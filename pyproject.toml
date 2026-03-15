@@ -57,7 +57,6 @@ markers = [
 ]
 
 [tool.uv]
-environments = ["sys_platform == 'darwin' and platform_release >= '22.0'"]
 dev-dependencies = [
     "pytest>=8.2.0",
     "pytest-asyncio>=0.23.7",

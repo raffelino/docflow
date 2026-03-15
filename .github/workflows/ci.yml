@@ -50,23 +50,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "latest"
-
       - name: Set up Python
-        run: uv python install 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
-      - name: Install dependencies
-        run: uv sync --dev
+      - name: Install lint tools
+        run: pip install ruff mypy
 
       - name: Ruff lint
-        run: uv run ruff check src/ tests/
+        run: ruff check src/ tests/
 
       - name: Ruff format check
-        run: uv run ruff format --check src/ tests/
+        run: ruff format --check src/ tests/
 
       - name: mypy type check
-        run: uv run mypy src/docflow --ignore-missing-imports --no-error-summary
+        run: mypy src/docflow --ignore-missing-imports --no-error-summary
         continue-on-error: true  # Type errors are warnings until fully annotated

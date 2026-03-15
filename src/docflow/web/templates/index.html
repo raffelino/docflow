@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — DocFlow{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h2>Letzte Läufe</h2>
+
+  {% if runs %}
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Gestartet</th>
+        <th>Beendet</th>
+        <th>Status</th>
+        <th>Fotos</th>
+        <th>Dokumente</th>
+        <th>Fehler</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for run in runs %}
+      <tr>
+        <td><code>#{{ run.id }}</code></td>
+        <td>{{ run.started_at or "—" }}</td>
+        <td>{{ run.finished_at or "—" }}</td>
+        <td>
+          {% if run.status == "success" %}
+            <span class="badge badge-success">✓ OK</span>
+          {% elif run.status == "error" %}
+            <span class="badge badge-error">✗ Fehler</span>
+          {% else %}
+            <span class="badge badge-running">⟳ Läuft</span>
+          {% endif %}
+        </td>
+        <td>{{ run.photos_found }}</td>
+        <td>{{ run.docs_processed }}</td>
+        <td>{% if run.errors %}<span style="color:#c0392b">{{ run.errors }}</span>{% else %}0{% endif %}</td>
+        <td><a href="/runs/{{ run.id }}">Details →</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty">
+    <div class="icon">🗂</div>
+    <p>Noch keine Läufe. Klicke auf <strong>▶ Jetzt ausführen</strong> oder warte auf den Tagesplan.</p>
+  </div>
+  {% endif %}
+</div>
+
+<div class="card" style="background:#f0f9ff;">
+  <h2 style="font-size:13px;color:#6e6e73;font-weight:500;">Über DocFlow</h2>
+  <p style="margin:0;color:#374151;font-size:13px;">
+    DocFlow liest Bilder aus Apple Fotos (Album: <strong>{{ request.app.state.settings.photos_album }}</strong>),
+    erkennt Text per OCR, klassifiziert Dokumente mit einem KI-Modell und archiviert sie als PDF.
+    {% if request.app.state.settings.email_enabled %}
+    E-Mail-Integration ist aktiv ({{ request.app.state.settings.email_imap_host }}).
+    {% endif %}
+    Speicher: <strong>{{ request.app.state.settings.storage_backend }}</strong>.
+  </p>
+</div>
+{% endblock %}

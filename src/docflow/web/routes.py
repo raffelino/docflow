@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -140,6 +141,88 @@ async def trigger_run(request: Request, background_tasks: BackgroundTasks):
     return RedirectResponse("/", status_code=303)
 
 
+# ── Settings ──────────────────────────────────────────────────────────────────
+
+# Fields exposed in the settings UI (secrets are excluded)
+_SETTINGS_FIELDS: list[str] = [
+    "photos_source",
+    "photos_album",
+    "llm_provider",
+    "ollama_base_url",
+    "ollama_model",
+    "openrouter_model",
+    "storage_backend",
+    "output_dir",
+    "icloud_docflow_path",
+    "s3_bucket",
+    "s3_prefix",
+    "s3_endpoint_url",
+    "schedule_hour",
+    "schedule_minute",
+    "email_enabled",
+    "email_imap_host",
+    "email_imap_port",
+    "email_folder",
+    "email_processed_folder",
+    "email_filter_subject",
+    "web_host",
+    "web_port",
+]
+
+
+def _write_env_file(settings, env_path: Path) -> None:
+    """Write non-secret settings to a .env file."""
+    lines: list[str] = []
+    for field in _SETTINGS_FIELDS:
+        val = getattr(settings, field)
+        if isinstance(val, bool):
+            lines.append(f"{field.upper()}={'true' if val else 'false'}")
+        elif isinstance(val, Path):
+            lines.append(f"{field.upper()}={val}")
+        else:
+            lines.append(f"{field.upper()}={val}")
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+@router.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request, saved: bool = False):
+    return _templates(request).TemplateResponse(
+        "settings.html",
+        {"request": request, "s": _settings(request), "saved": saved},
+    )
+
+
+@router.post("/settings")
+async def settings_save(request: Request):
+    form = await request.form()
+    settings = _settings(request)
+
+    updates: dict = {}
+    for field in _SETTINGS_FIELDS:
+        if field == "email_enabled":
+            updates[field] = form.get("email_enabled") == "true"
+        elif field in ("schedule_hour", "schedule_minute", "email_imap_port", "web_port"):
+            raw = form.get(field, "")
+            if raw != "":
+                updates[field] = int(raw)
+        elif field in ("output_dir", "icloud_docflow_path"):
+            raw = form.get(field, "")
+            if raw:
+                updates[field] = Path(raw).expanduser().resolve()
+        else:
+            val = form.get(field, "")
+            if val is not None:
+                updates[field] = val
+
+    new_settings = settings.model_copy(update=updates)
+    request.app.state.settings = new_settings
+
+    env_path = Path.cwd() / ".env"
+    _write_env_file(new_settings, env_path)
+
+    return RedirectResponse("/settings?saved=1", status_code=303)
+
+
 # ── API: JSON endpoints ────────────────────────────────────────────────────────
 
 
@@ -171,6 +254,12 @@ async def api_documents(
     else:
         docs = db.list_documents(limit=limit, offset=offset, doc_type=doc_type, source=source)
     return [_enrich(d) for d in docs]
+
+
+@router.get("/api/settings")
+async def api_settings(request: Request):
+    settings = _settings(request)
+    return {field: str(getattr(settings, field)) for field in _SETTINGS_FIELDS}
 
 
 @router.get("/api/documents/{doc_id}")

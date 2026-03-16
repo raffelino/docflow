@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Generator, Optional
 
 import structlog
 
@@ -151,7 +151,7 @@ class Database:
                 (datetime.utcnow(), status, photos_found, docs_processed, errors, log, run_id),
             )
 
-    def get_run(self, run_id: int) -> Optional[dict]:
+    def get_run(self, run_id: int) -> dict | None:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
             return dict(row) if row else None
@@ -177,11 +177,11 @@ class Database:
         suggested_filename: str,
         saved_path: str,
         source: str = "photos",
-        email_subject: Optional[str] = None,
-        email_sender: Optional[str] = None,
-        email_date: Optional[datetime] = None,
-        storage_backend: Optional[str] = None,
-        cloud_path: Optional[str] = None,
+        email_subject: str | None = None,
+        email_sender: str | None = None,
+        email_date: datetime | None = None,
+        storage_backend: str | None = None,
+        cloud_path: str | None = None,
     ) -> int:
         with self._connect() as conn:
             cur = conn.execute(
@@ -217,9 +217,9 @@ class Database:
         self,
         limit: int = 50,
         offset: int = 0,
-        doc_type: Optional[str] = None,
-        tag: Optional[str] = None,
-        source: Optional[str] = None,
+        doc_type: str | None = None,
+        tag: str | None = None,
+        source: str | None = None,
     ) -> list[dict]:
         with self._connect() as conn:
             clauses: list[str] = []
@@ -254,7 +254,7 @@ class Database:
             ).fetchall()
             return [dict(r) for r in rows]
 
-    def get_document(self, doc_id: int) -> Optional[dict]:
+    def get_document(self, doc_id: int) -> dict | None:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
             return dict(row) if row else None

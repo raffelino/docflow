@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -77,9 +76,15 @@ class TestWebRoutes:
         db = Database(settings.db_path)
         run_id = db.create_run()
         db.insert_document(
-            run_id=run_id, original_photo_id="u1", original_filename="f.jpg",
-            ocr_text="hello", llm_provider="a", doc_type="Brief",
-            tags=["tag1"], suggested_filename="brief.pdf", saved_path="/tmp/brief.pdf",
+            run_id=run_id,
+            original_photo_id="u1",
+            original_filename="f.jpg",
+            ocr_text="hello",
+            llm_provider="a",
+            doc_type="Brief",
+            tags=["tag1"],
+            suggested_filename="brief.pdf",
+            saved_path="/tmp/brief.pdf",
         )
 
         client = TestClient(app)
@@ -95,14 +100,26 @@ class TestWebRoutes:
         db = Database(settings.db_path)
         run_id = db.create_run()
         db.insert_document(
-            run_id=run_id, original_photo_id="u1", original_filename="f.jpg",
-            ocr_text="Vodafone Rechnung März", llm_provider="a", doc_type="Rechnung",
-            tags=["Vodafone"], suggested_filename="vodafone.pdf", saved_path="/tmp/v.pdf",
+            run_id=run_id,
+            original_photo_id="u1",
+            original_filename="f.jpg",
+            ocr_text="Vodafone Rechnung März",
+            llm_provider="a",
+            doc_type="Rechnung",
+            tags=["Vodafone"],
+            suggested_filename="vodafone.pdf",
+            saved_path="/tmp/v.pdf",
         )
         db.insert_document(
-            run_id=run_id, original_photo_id="u2", original_filename="g.jpg",
-            ocr_text="Amazon Lieferschein Paket", llm_provider="a", doc_type="Lieferschein",
-            tags=["Amazon"], suggested_filename="amazon.pdf", saved_path="/tmp/a.pdf",
+            run_id=run_id,
+            original_photo_id="u2",
+            original_filename="g.jpg",
+            ocr_text="Amazon Lieferschein Paket",
+            llm_provider="a",
+            doc_type="Lieferschein",
+            tags=["Amazon"],
+            suggested_filename="amazon.pdf",
+            saved_path="/tmp/a.pdf",
         )
 
         client = TestClient(app)
@@ -133,14 +150,26 @@ class TestWebRoutes:
         db = Database(settings.db_path)
         run_id = db.create_run()
         db.insert_document(
-            run_id=run_id, original_photo_id="u1", original_filename="r.jpg",
-            ocr_text="rechnung text", llm_provider="a", doc_type="Rechnung",
-            tags=[], suggested_filename="r.pdf", saved_path="/tmp/r.pdf",
+            run_id=run_id,
+            original_photo_id="u1",
+            original_filename="r.jpg",
+            ocr_text="rechnung text",
+            llm_provider="a",
+            doc_type="Rechnung",
+            tags=[],
+            suggested_filename="r.pdf",
+            saved_path="/tmp/r.pdf",
         )
         db.insert_document(
-            run_id=run_id, original_photo_id="u2", original_filename="v.jpg",
-            ocr_text="vertrag text", llm_provider="a", doc_type="Vertrag",
-            tags=[], suggested_filename="v.pdf", saved_path="/tmp/v.pdf",
+            run_id=run_id,
+            original_photo_id="u2",
+            original_filename="v.jpg",
+            ocr_text="vertrag text",
+            llm_provider="a",
+            doc_type="Vertrag",
+            tags=[],
+            suggested_filename="v.pdf",
+            saved_path="/tmp/v.pdf",
         )
 
         client = TestClient(app)

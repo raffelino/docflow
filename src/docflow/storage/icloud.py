@@ -16,9 +16,7 @@ import structlog
 
 logger = structlog.get_logger(__name__)
 
-DEFAULT_ICLOUD_BASE = Path(
-    "~/Library/Mobile Documents/com~apple~CloudDocs/DocFlow"
-).expanduser()
+DEFAULT_ICLOUD_BASE = Path("~/Library/Mobile Documents/com~apple~CloudDocs/DocFlow").expanduser()
 
 
 class ICloudStorage:

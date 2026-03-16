@@ -11,12 +11,10 @@ Orchestrates:
 from __future__ import annotations
 
 import io
-import logging
 import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import structlog
 from PIL import Image
@@ -25,7 +23,7 @@ from docflow.config import Settings
 from docflow.db import Database
 from docflow.llm import DocumentClassification, get_llm_provider
 from docflow.llm.base import LLMProvider
-from docflow.ocr import extract_text, extract_text_from_bytes
+from docflow.ocr import extract_text
 from docflow.photos import PhotoInfo, get_library
 from docflow.storage import StorageBackend, get_storage_backend
 
@@ -85,8 +83,8 @@ class Pipeline:
         self,
         settings: Settings,
         db: Database,
-        llm: Optional[LLMProvider] = None,
-        storage: Optional[StorageBackend] = None,
+        llm: LLMProvider | None = None,
+        storage: StorageBackend | None = None,
     ) -> None:
         self.settings = settings
         self.db = db
@@ -95,7 +93,7 @@ class Pipeline:
 
     async def run(
         self,
-        mock_photos: Optional[list[PhotoInfo]] = None,
+        mock_photos: list[PhotoInfo] | None = None,
     ) -> int:
         """Run the full pipeline. Returns the run_id."""
         run_id = self.db.create_run()
@@ -116,9 +114,14 @@ class Pipeline:
                 album=self.settings.photos_album,
                 mock_photos=mock_photos,
             )
-            photos = library.get_photos_in_album(self.settings.photos_album)
-            photos_found = len(photos)
-            log(f"Found {photos_found} photos in album '{self.settings.photos_album}'")
+            if self.settings.photos_source == "all":
+                photos = library.get_all_photos()
+                photos_found = len(photos)
+                log(f"Found {photos_found} photos in library")
+            else:
+                photos = library.get_photos_in_album(self.settings.photos_album)
+                photos_found = len(photos)
+                log(f"Found {photos_found} photos in album '{self.settings.photos_album}'")
         except Exception as e:
             log(f"ERROR fetching photos: {e}")
             errors += 1
@@ -139,10 +142,7 @@ class Pipeline:
             errors += email_errors
 
         status = "error" if errors and not docs_processed else "success"
-        log(
-            f"Pipeline finished — processed: {docs_processed}, "
-            f"errors: {errors}, status: {status}"
-        )
+        log(f"Pipeline finished — processed: {docs_processed}, errors: {errors}, status: {status}")
 
         self.db.finish_run(
             run_id=run_id,
@@ -217,9 +217,7 @@ class Pipeline:
             storage_backend=self.storage.name,
         )
 
-    async def _process_emails(
-        self, run_id: int, log
-    ) -> tuple[int, int]:
+    async def _process_emails(self, run_id: int, log) -> tuple[int, int]:
         """Process email attachments. Returns (docs_processed, errors)."""
         from docflow.email_source import IMAPEmailSource, extract_text_from_attachment
 
@@ -251,9 +249,7 @@ class Pipeline:
                 ocr_text = await extract_text_from_attachment(attachment)
                 log(f"    OCR: {len(ocr_text)} chars")
 
-                classification = await self.llm.classify_document(
-                    ocr_text or "[No text extracted]"
-                )
+                classification = await self.llm.classify_document(ocr_text or "[No text extracted]")
                 log(
                     f"    Classified as '{classification.doc_type}' "
                     f"(filename={classification.suggested_filename})"

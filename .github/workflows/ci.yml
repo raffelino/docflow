@@ -7,10 +7,10 @@ on:
     branches: [main]
 
 jobs:
-  # ── Unit tests (macOS — matches production environment) ───────────────────
+  # ── Unit tests (ubuntu — all macOS APIs are mocked in unit tests) ──────────
   test:
-    name: Unit Tests (macOS)
-    runs-on: macos-latest
+    name: Unit Tests
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -28,21 +28,10 @@ jobs:
 
       - name: Run unit tests
         run: uv run pytest -m unit -v --tb=short
-        # Note: E2E tests (-m e2e) are intentionally skipped in CI because:
-        #   1. They require Apple Vision / osxphotos (macOS-only runtime deps)
-        #   2. Some tests (S3/moto) need optional deps not installed by default
-        #   3. Run `uv run pytest -m e2e` locally before releasing
         env:
           PYTHONPATH: src
 
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: .pytest_cache/
-
-  # ── Lint + type check (ubuntu — faster, cheaper) ──────────────────────────
+  # ── Lint + type check ──────────────────────────────────────────────────────
   lint:
     name: Lint & Type Check
     runs-on: ubuntu-latest
@@ -50,20 +39,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
         with:
-          python-version: "3.11"
+          version: "latest"
 
-      - name: Install lint tools
-        run: pip install ruff mypy
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --dev
 
       - name: Ruff lint
-        run: ruff check src/ tests/
+        run: uv run ruff check src/ tests/
 
       - name: Ruff format check
-        run: ruff format --check src/ tests/
+        run: uv run ruff format --check src/ tests/
 
       - name: mypy type check
-        run: mypy src/docflow --ignore-missing-imports --no-error-summary
-        continue-on-error: true  # Type errors are warnings until fully annotated
+        run: uv run mypy src/docflow --ignore-missing-imports --no-error-summary
+        continue-on-error: true

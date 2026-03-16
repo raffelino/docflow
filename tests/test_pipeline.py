@@ -11,14 +11,14 @@ from docflow.config import Settings
 from docflow.db import Database
 from docflow.llm.base import DocumentClassification
 from docflow.photos import MockPhotosLibrary, PhotoInfo
-from docflow.pipeline import Pipeline, _safe_filename, _destination_path
-from tests.conftest import FAKE_CLASSIFICATION, make_mock_llm
+from docflow.pipeline import Pipeline, _destination_path, _safe_filename
+from tests.conftest import FAKE_CLASSIFICATION
 
 
 @pytest.mark.unit
 class TestHelpers:
     def test_safe_filename_removes_bad_chars(self):
-        name = 'foo/bar:baz<>*?.pdf'
+        name = "foo/bar:baz<>*?.pdf"
         result = _safe_filename(name)
         assert "/" not in result
         assert ":" not in result
@@ -31,6 +31,7 @@ class TestHelpers:
 
     def test_destination_path_structure(self):
         from datetime import datetime
+
         cls = DocumentClassification(
             doc_type="Rechnung",
             tags=[],
@@ -43,6 +44,7 @@ class TestHelpers:
 
     def test_destination_path_adds_pdf_extension(self):
         from datetime import datetime
+
         cls = DocumentClassification(
             doc_type="Brief",
             tags=[],
@@ -73,9 +75,12 @@ class TestPipeline:
         )
 
         from docflow.storage.local import LocalStorage
+
         storage = LocalStorage(base_dir=settings.output_dir)
 
-        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value="Rechnung Vodafone 45 EUR")):
+        with patch(
+            "docflow.pipeline.extract_text", new=AsyncMock(return_value="Rechnung Vodafone 45 EUR")
+        ):
             pipeline = Pipeline(settings=settings, db=db, llm=mock_llm, storage=storage)
             with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([photo])):
                 run_id = await pipeline.run()
@@ -110,6 +115,7 @@ class TestPipeline:
         failing_llm.classify_document = AsyncMock(side_effect=RuntimeError("LLM down"))
 
         from docflow.storage.local import LocalStorage
+
         storage = LocalStorage(base_dir=settings.output_dir)
 
         with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value="text")):
@@ -121,6 +127,38 @@ class TestPipeline:
         assert run["errors"] == 1
 
     @pytest.mark.asyncio
+    async def test_run_with_photos_source_all(
+        self,
+        settings: Settings,
+        db: Database,
+        tmp_dir: Path,
+        fake_image: Path,
+        mock_llm,
+    ):
+        """Pipeline with photos_source='all' uses get_all_photos()."""
+        settings.photos_source = "all"
+        photo = PhotoInfo(
+            uuid="all-001",
+            filename="doc.jpg",
+            path=fake_image,
+            original_filename="original.jpg",
+        )
+
+        from docflow.storage.local import LocalStorage
+
+        storage = LocalStorage(base_dir=settings.output_dir)
+        mock_lib = MockPhotosLibrary([photo])
+
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value="Some text")):
+            pipeline = Pipeline(settings=settings, db=db, llm=mock_llm, storage=storage)
+            with patch("docflow.pipeline.get_library", return_value=mock_lib):
+                run_id = await pipeline.run()
+
+        run = db.get_run(run_id)
+        assert run["status"] == "success"
+        assert run["docs_processed"] == 1
+
+    @pytest.mark.asyncio
     async def test_run_empty_album(
         self,
         settings: Settings,
@@ -128,6 +166,7 @@ class TestPipeline:
         mock_llm,
     ):
         from docflow.storage.local import LocalStorage
+
         storage = LocalStorage(base_dir=settings.output_dir)
         pipeline = Pipeline(settings=settings, db=db, llm=mock_llm, storage=storage)
 
@@ -155,6 +194,7 @@ class TestPipeline:
         )
 
         from docflow.storage.local import LocalStorage
+
         storage = LocalStorage(base_dir=settings.output_dir)
 
         with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value="text")):

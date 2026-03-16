@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -39,7 +39,9 @@ class TestOCR:
         img_path.write_bytes(b"fake")
 
         with patch.object(ocr_module, "_VISION_AVAILABLE", True):
-            with patch.object(ocr_module, "_run_vision_ocr", return_value="Hello World") as mock_ocr:
+            with patch.object(
+                ocr_module, "_run_vision_ocr", return_value="Hello World"
+            ) as mock_ocr:
                 result = await ocr_module.extract_text(img_path)
 
         assert result == "Hello World"
@@ -55,5 +57,7 @@ class TestOCR:
     async def test_extract_text_from_bytes_with_vision(self):
         with patch.object(ocr_module, "_VISION_AVAILABLE", True):
             with patch.object(ocr_module, "_run_vision_ocr", return_value="Scanned text"):
-                result = await ocr_module.extract_text_from_bytes(b"fake image bytes", suffix=".jpg")
+                result = await ocr_module.extract_text_from_bytes(
+                    b"fake image bytes", suffix=".jpg"
+                )
         assert result == "Scanned text"

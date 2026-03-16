@@ -14,13 +14,10 @@ import email
 import email.policy
 import imaplib
 import io
-import logging
-import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Optional
 
 import structlog
 
@@ -49,7 +46,7 @@ class EmailAttachment:
     # email metadata
     subject: str
     sender: str
-    email_date: Optional[datetime]
+    email_date: datetime | None
     message_uid: str
 
 
@@ -60,7 +57,7 @@ class EmailSourceResult:
     errors: list[str] = field(default_factory=list)
 
 
-def _parse_email_date(date_str: Optional[str]) -> Optional[datetime]:
+def _parse_email_date(date_str: str | None) -> datetime | None:
     if not date_str:
         return None
     from email.utils import parsedate_to_datetime
@@ -121,9 +118,7 @@ class IMAPEmailSource:
         if result not in ("OK", "NO"):
             logger.warning("Could not create processed folder", folder=self.processed_folder)
 
-    def _move_message(
-        self, conn: imaplib.IMAP4_SSL, uid: bytes, destination: str
-    ) -> None:
+    def _move_message(self, conn: imaplib.IMAP4_SSL, uid: bytes, destination: str) -> None:
         """Move a message by UID to destination folder (copy + delete + expunge)."""
         conn.uid("COPY", uid, destination)
         conn.uid("STORE", uid, "+FLAGS", r"(\Deleted)")
@@ -189,7 +184,8 @@ class IMAPEmailSource:
 
         raw = msg_data[0][1]  # type: ignore[index]
         msg: EmailMessage = email.message_from_bytes(
-            raw, policy=email.policy.default  # type: ignore[arg-type]
+            raw,
+            policy=email.policy.default,  # type: ignore[arg-type]
         )
 
         subject = str(msg.get("Subject", ""))

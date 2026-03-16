@@ -118,14 +118,28 @@ class TestDatabase:
     def test_list_documents_filter_by_source(self, db: Database):
         run_id = db.create_run()
         db.insert_document(
-            run_id=run_id, original_photo_id="p1", original_filename="p.jpg",
-            ocr_text="photo doc", llm_provider="a", doc_type="Brief",
-            tags=[], suggested_filename="p.pdf", saved_path="/tmp/p.pdf", source="photos",
+            run_id=run_id,
+            original_photo_id="p1",
+            original_filename="p.jpg",
+            ocr_text="photo doc",
+            llm_provider="a",
+            doc_type="Brief",
+            tags=[],
+            suggested_filename="p.pdf",
+            saved_path="/tmp/p.pdf",
+            source="photos",
         )
         db.insert_document(
-            run_id=run_id, original_photo_id="e1", original_filename="e.pdf",
-            ocr_text="email doc", llm_provider="a", doc_type="Rechnung",
-            tags=[], suggested_filename="e.pdf", saved_path="/tmp/e.pdf", source="email",
+            run_id=run_id,
+            original_photo_id="e1",
+            original_filename="e.pdf",
+            ocr_text="email doc",
+            llm_provider="a",
+            doc_type="Rechnung",
+            tags=[],
+            suggested_filename="e.pdf",
+            saved_path="/tmp/e.pdf",
+            source="email",
         )
         photos_docs = db.list_documents(source="photos")
         assert all(d["source"] == "photos" for d in photos_docs)
@@ -169,9 +183,15 @@ class TestDatabase:
         run_id = db.create_run()
         for dt in ["Rechnung", "Vertrag", "Rechnung"]:
             db.insert_document(
-                run_id=run_id, original_photo_id="x", original_filename="x.jpg",
-                ocr_text="t", llm_provider="a", doc_type=dt,
-                tags=[], suggested_filename="x.pdf", saved_path="/tmp/x.pdf",
+                run_id=run_id,
+                original_photo_id="x",
+                original_filename="x.jpg",
+                ocr_text="t",
+                llm_provider="a",
+                doc_type=dt,
+                tags=[],
+                suggested_filename="x.pdf",
+                saved_path="/tmp/x.pdf",
             )
         types = db.list_doc_types()
         assert "Rechnung" in types
@@ -180,7 +200,7 @@ class TestDatabase:
 
     def test_migration_idempotent(self, tmp_dir: Path):
         """Opening a DB twice should not fail (migration triggers are safe)."""
-        db1 = Database(tmp_dir / "idempotent.db")
+        Database(tmp_dir / "idempotent.db")
         db2 = Database(tmp_dir / "idempotent.db")
         run_id = db2.create_run()
         assert run_id == 1

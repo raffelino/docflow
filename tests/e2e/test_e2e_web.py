@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -103,15 +102,25 @@ class TestE2EWebApp:
         client, db, _ = _client_and_db(e2e_dir)
         run_id = db.create_run()
         db.insert_document(
-            run_id=run_id, original_photo_id="u1", original_filename="x.jpg",
-            ocr_text="Telekom Rechnung März 2026", llm_provider="a",
-            doc_type="Rechnung", tags=["Telekom"], suggested_filename="telekom.pdf",
+            run_id=run_id,
+            original_photo_id="u1",
+            original_filename="x.jpg",
+            ocr_text="Telekom Rechnung März 2026",
+            llm_provider="a",
+            doc_type="Rechnung",
+            tags=["Telekom"],
+            suggested_filename="telekom.pdf",
             saved_path="/tmp/t.pdf",
         )
         db.insert_document(
-            run_id=run_id, original_photo_id="u2", original_filename="y.jpg",
-            ocr_text="DKB Kontoauszug", llm_provider="a",
-            doc_type="Kontoauszug", tags=["DKB"], suggested_filename="dkb.pdf",
+            run_id=run_id,
+            original_photo_id="u2",
+            original_filename="y.jpg",
+            ocr_text="DKB Kontoauszug",
+            llm_provider="a",
+            doc_type="Kontoauszug",
+            tags=["DKB"],
+            suggested_filename="dkb.pdf",
             saved_path="/tmp/d.pdf",
         )
 
@@ -125,14 +134,28 @@ class TestE2EWebApp:
         client, db, _ = _client_and_db(e2e_dir)
         run_id = db.create_run()
         db.insert_document(
-            run_id=run_id, original_photo_id="p1", original_filename="p.jpg",
-            ocr_text="photo doc", llm_provider="a", doc_type="Brief",
-            tags=[], suggested_filename="p.pdf", saved_path="/tmp/p.pdf", source="photos",
+            run_id=run_id,
+            original_photo_id="p1",
+            original_filename="p.jpg",
+            ocr_text="photo doc",
+            llm_provider="a",
+            doc_type="Brief",
+            tags=[],
+            suggested_filename="p.pdf",
+            saved_path="/tmp/p.pdf",
+            source="photos",
         )
         db.insert_document(
-            run_id=run_id, original_photo_id="e1", original_filename="e.pdf",
-            ocr_text="email doc", llm_provider="a", doc_type="Rechnung",
-            tags=[], suggested_filename="e.pdf", saved_path="/tmp/e.pdf", source="email",
+            run_id=run_id,
+            original_photo_id="e1",
+            original_filename="e.pdf",
+            ocr_text="email doc",
+            llm_provider="a",
+            doc_type="Rechnung",
+            tags=[],
+            suggested_filename="e.pdf",
+            saved_path="/tmp/e.pdf",
+            source="email",
         )
 
         resp = client.get("/documents?source=email")
@@ -155,10 +178,16 @@ class TestE2EWebApp:
     def test_api_documents_json(self, e2e_dir: Path):
         client, db, _ = _client_and_db(e2e_dir)
         run_id = db.create_run()
-        doc_id = db.insert_document(
-            run_id=run_id, original_photo_id="u", original_filename="f.jpg",
-            ocr_text="text", llm_provider="a", doc_type="Brief",
-            tags=["tag1", "tag2"], suggested_filename="brief.pdf", saved_path="/tmp/b.pdf",
+        db.insert_document(
+            run_id=run_id,
+            original_photo_id="u",
+            original_filename="f.jpg",
+            ocr_text="text",
+            llm_provider="a",
+            doc_type="Brief",
+            tags=["tag1", "tag2"],
+            suggested_filename="brief.pdf",
+            saved_path="/tmp/b.pdf",
         )
 
         resp = client.get("/api/documents")
@@ -171,9 +200,15 @@ class TestE2EWebApp:
         client, db, _ = _client_and_db(e2e_dir)
         run_id = db.create_run()
         doc_id = db.insert_document(
-            run_id=run_id, original_photo_id="u", original_filename="f.jpg",
-            ocr_text="text", llm_provider="a", doc_type="Vertrag",
-            tags=[], suggested_filename="v.pdf", saved_path="/tmp/v.pdf",
+            run_id=run_id,
+            original_photo_id="u",
+            original_filename="f.jpg",
+            ocr_text="text",
+            llm_provider="a",
+            doc_type="Vertrag",
+            tags=[],
+            suggested_filename="v.pdf",
+            saved_path="/tmp/v.pdf",
         )
 
         resp = client.get(f"/api/documents/{doc_id}")

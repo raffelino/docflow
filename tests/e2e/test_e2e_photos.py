@@ -93,12 +93,14 @@ class TestE2EPhotoPipeline:
         for i in range(3):
             p = e2e_dir / f"photo_{i}.jpg"
             Image.new("RGB", (80, 80), color=(200, 200, 200)).save(p, format="JPEG")
-            photos.append(PhotoInfo(
-                uuid=f"uuid-{i}",
-                filename=p.name,
-                path=p,
-                original_filename=p.name,
-            ))
+            photos.append(
+                PhotoInfo(
+                    uuid=f"uuid-{i}",
+                    filename=p.name,
+                    path=p,
+                    original_filename=p.name,
+                )
+            )
 
         storage = LocalStorage(base_dir=e2e_settings.output_dir)
         pipeline = Pipeline(

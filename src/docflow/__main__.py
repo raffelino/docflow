@@ -1,6 +1,5 @@
 """Entry point: starts the web server and scheduler together."""
 
-import asyncio
 import logging
 
 import structlog

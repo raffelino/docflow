@@ -9,7 +9,6 @@ Install with: uv add boto3
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import structlog
 
@@ -25,9 +24,9 @@ class S3Storage:
         self,
         bucket: str,
         prefix: str = "docflow/",
-        aws_access_key_id: Optional[str] = None,
-        aws_secret_access_key: Optional[str] = None,
-        endpoint_url: Optional[str] = None,
+        aws_access_key_id: str | None = None,
+        aws_secret_access_key: str | None = None,
+        endpoint_url: str | None = None,
         region_name: str = "us-east-1",
     ) -> None:
         if not bucket:
@@ -36,9 +35,7 @@ class S3Storage:
         try:
             import boto3  # type: ignore
         except ImportError as e:
-            raise ImportError(
-                "boto3 is required for S3 storage. Install with: uv add boto3"
-            ) from e
+            raise ImportError("boto3 is required for S3 storage. Install with: uv add boto3") from e
 
         self.bucket = bucket
         self.prefix = prefix.rstrip("/") + "/"

@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-import io
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
-from PIL import Image
 
 
 def _make_pdf(path: Path) -> Path:
-    path.write_bytes(
-        b"%PDF-1.4\n1 0 obj<</Type /Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"
-    )
+    path.write_bytes(b"%PDF-1.4\n1 0 obj<</Type /Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n")
     return path
 
 
@@ -57,6 +53,7 @@ class TestE2ELocalStorage:
     @pytest.mark.asyncio
     async def test_name_property(self, e2e_dir: Path):
         from docflow.storage.local import LocalStorage
+
         storage = LocalStorage(base_dir=e2e_dir)
         assert storage.name == "local"
 
@@ -92,6 +89,7 @@ class TestE2EICloudStorage:
 
     def test_name_property(self, e2e_dir: Path):
         from docflow.storage.icloud import ICloudStorage
+
         storage = ICloudStorage(base_dir=e2e_dir)
         assert storage.name == "icloud"
 
@@ -102,16 +100,18 @@ class TestE2ES3Storage:
     async def test_save_to_s3_moto(self, e2e_dir: Path):
         """S3 storage uploads using moto (in-memory S3 mock)."""
         try:
-            import boto3
-            import moto
+            import boto3  # noqa: F401
+            import moto  # noqa: F401
         except ImportError:
             pytest.skip("boto3 and moto required for S3 tests")
 
         from moto import mock_s3
+
         from docflow.storage.generic_cloud import S3Storage
 
         with mock_s3():
             import boto3 as _boto3
+
             conn = _boto3.client("s3", region_name="us-east-1")
             conn.create_bucket(Bucket="test-docflow-bucket")
 
@@ -132,20 +132,23 @@ class TestE2ES3Storage:
 
     def test_s3_raises_without_bucket(self, e2e_dir: Path):
         from docflow.storage.generic_cloud import S3Storage
+
         with pytest.raises(ValueError, match="S3_BUCKET"):
             S3Storage(bucket="")
 
     def test_name_property(self, e2e_dir: Path):
         try:
-            import boto3
+            import boto3  # noqa: F401
         except ImportError:
             pytest.skip("boto3 required")
 
         from moto import mock_s3
+
         from docflow.storage.generic_cloud import S3Storage
 
         with mock_s3():
             import boto3 as _b
+
             _b.client("s3", region_name="us-east-1").create_bucket(Bucket="b")
             storage = S3Storage(bucket="b", aws_access_key_id="k", aws_secret_access_key="s")
             assert storage.name == "s3"
@@ -155,11 +158,13 @@ class TestE2ES3Storage:
 class TestE2EStorageFactory:
     def test_get_local_storage(self, e2e_settings):
         from docflow.storage import get_storage_backend
+
         storage = get_storage_backend(e2e_settings)
         assert storage.name == "local"
 
     def test_get_icloud_storage(self, e2e_settings, e2e_dir: Path):
         from docflow.storage import get_storage_backend
+
         settings = e2e_settings.model_copy(
             update={"storage_backend": "icloud", "icloud_docflow_path": e2e_dir / "icloud"}
         )
@@ -168,7 +173,6 @@ class TestE2EStorageFactory:
 
     def test_invalid_backend_raises(self, e2e_settings):
         from docflow.storage import get_storage_backend
-        from unittest.mock import MagicMock
 
         # Bypass pydantic Literal validation by using a mock settings object
         mock_settings = MagicMock()

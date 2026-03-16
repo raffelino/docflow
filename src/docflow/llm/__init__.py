@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from docflow.llm.base import DocumentClassification, LLMProvider
 from docflow.config import Settings
+from docflow.llm.base import DocumentClassification, LLMProvider
 
 
 def get_llm_provider(settings: Settings) -> LLMProvider:

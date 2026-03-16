@@ -8,7 +8,6 @@ import email.mime.base
 import email.mime.multipart
 import email.mime.text
 import io
-import json
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -90,14 +89,19 @@ class TestE2EEmailPipeline:
                 "docflow.pipeline.get_library",
                 return_value=MagicMock(get_photos_in_album=MagicMock(return_value=[])),
             ):
-                with patch("docflow.email_source.IMAPEmailSource", return_value=mock_source_instance):
+                with patch(
+                    "docflow.email_source.IMAPEmailSource", return_value=mock_source_instance
+                ):
                     with patch(
                         "docflow.email_source.extract_text_from_attachment",
                         new=AsyncMock(return_value="Vodafone Rechnung 45 EUR"),
                     ):
                         import docflow.email_source as es_mod
+
                         es_mod.IMAPEmailSource = MagicMock(return_value=mock_source_instance)
-                        es_mod.extract_text_from_attachment = AsyncMock(return_value="Vodafone Rechnung 45 EUR")
+                        es_mod.extract_text_from_attachment = AsyncMock(
+                            return_value="Vodafone Rechnung 45 EUR"
+                        )
                         run_id = await pipeline.run()
 
         run = e2e_db.get_run(run_id)
@@ -148,10 +152,13 @@ class TestE2EEmailPipeline:
             message_uid="1",
         )
 
-        with patch("docflow.ocr.extract_text_from_bytes", new=AsyncMock(return_value="scanned text")):
+        with patch(
+            "docflow.ocr.extract_text_from_bytes", new=AsyncMock(return_value="scanned text")
+        ):
             with patch.dict("sys.modules", {}):
                 # patch at the import location inside email_source
                 import docflow.ocr as ocr_mod
+
                 original = ocr_mod.extract_text_from_bytes
                 ocr_mod.extract_text_from_bytes = AsyncMock(return_value="scanned text")
                 try:

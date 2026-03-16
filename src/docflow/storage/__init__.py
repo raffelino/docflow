@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from docflow.storage.base import StorageBackend
 from docflow.config import Settings
+from docflow.storage.base import StorageBackend
 
 
 def get_storage_backend(settings: Settings) -> StorageBackend:

@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from docflow.llm.base import (
-    DocumentClassification,
     build_prompt,
     parse_classification_response,
 )
@@ -17,12 +16,14 @@ from docflow.llm.base import (
 @pytest.mark.unit
 class TestParseClassificationResponse:
     def test_clean_json(self):
-        raw = json.dumps({
-            "doc_type": "Rechnung",
-            "tags": ["Vodafone", "2026-03"],
-            "suggested_filename": "2026-03_Vodafone_Rechnung.pdf",
-            "confidence": 0.95,
-        })
+        raw = json.dumps(
+            {
+                "doc_type": "Rechnung",
+                "tags": ["Vodafone", "2026-03"],
+                "suggested_filename": "2026-03_Vodafone_Rechnung.pdf",
+                "confidence": 0.95,
+            }
+        )
         result = parse_classification_response(raw)
         assert result.doc_type == "Rechnung"
         assert "Vodafone" in result.tags
@@ -66,12 +67,14 @@ class TestAnthropicProvider:
     async def test_classify_document(self):
         from docflow.llm.anthropic import AnthropicProvider
 
-        fake_response = json.dumps({
-            "doc_type": "Kontoauszug",
-            "tags": ["DKB", "2026-02"],
-            "suggested_filename": "2026-02_DKB_Kontoauszug.pdf",
-            "confidence": 0.88,
-        })
+        fake_response = json.dumps(
+            {
+                "doc_type": "Kontoauszug",
+                "tags": ["DKB", "2026-02"],
+                "suggested_filename": "2026-02_DKB_Kontoauszug.pdf",
+                "confidence": 0.88,
+            }
+        )
 
         mock_message = MagicMock()
         mock_message.content = [MagicMock(text=fake_response)]
@@ -93,6 +96,7 @@ class TestAnthropicProvider:
 
     def test_raises_without_api_key(self):
         from docflow.llm.anthropic import AnthropicProvider
+
         with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
             AnthropicProvider(api_key="")
 
@@ -101,16 +105,17 @@ class TestAnthropicProvider:
 class TestOllamaProvider:
     @pytest.mark.asyncio
     async def test_classify_document(self):
-        import httpx
         from docflow.llm.ollama import OllamaProvider
 
         fake_response = {
-            "response": json.dumps({
-                "doc_type": "Vertrag",
-                "tags": ["Mietvertrag"],
-                "suggested_filename": "2026-01_Mietvertrag.pdf",
-                "confidence": 0.80,
-            })
+            "response": json.dumps(
+                {
+                    "doc_type": "Vertrag",
+                    "tags": ["Mietvertrag"],
+                    "suggested_filename": "2026-01_Mietvertrag.pdf",
+                    "confidence": 0.80,
+                }
+            )
         }
 
         mock_response = MagicMock()
@@ -138,12 +143,18 @@ class TestOpenRouterProvider:
 
         fake_response = {
             "choices": [
-                {"message": {"content": json.dumps({
-                    "doc_type": "Rechnung",
-                    "tags": ["Telekom"],
-                    "suggested_filename": "2026-03_Telekom_Rechnung.pdf",
-                    "confidence": 0.91,
-                })}}
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "doc_type": "Rechnung",
+                                "tags": ["Telekom"],
+                                "suggested_filename": "2026-03_Telekom_Rechnung.pdf",
+                                "confidence": 0.91,
+                            }
+                        )
+                    }
+                }
             ]
         }
 
@@ -165,5 +176,6 @@ class TestOpenRouterProvider:
 
     def test_raises_without_api_key(self):
         from docflow.llm.openrouter import OpenRouterProvider
+
         with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
             OpenRouterProvider(api_key="")

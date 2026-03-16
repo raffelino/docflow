@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -78,10 +77,10 @@ async def run_detail(request: Request, run_id: int):
 @router.get("/documents", response_class=HTMLResponse)
 async def documents(
     request: Request,
-    q: Optional[str] = None,
-    doc_type: Optional[str] = None,
-    tag: Optional[str] = None,
-    source: Optional[str] = None,
+    q: str | None = None,
+    doc_type: str | None = None,
+    tag: str | None = None,
+    source: str | None = None,
     offset: int = 0,
     limit: int = 50,
 ):
@@ -122,7 +121,6 @@ async def documents(
 
 def _do_run(settings, db_path):
     """Run pipeline in a background thread (called from BackgroundTasks)."""
-    import asyncio
     from docflow.db import Database
     from docflow.pipeline import Pipeline
 
@@ -161,9 +159,9 @@ async def api_run(request: Request, run_id: int):
 @router.get("/api/documents")
 async def api_documents(
     request: Request,
-    q: Optional[str] = None,
-    doc_type: Optional[str] = None,
-    source: Optional[str] = None,
+    q: str | None = None,
+    doc_type: str | None = None,
+    source: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ):

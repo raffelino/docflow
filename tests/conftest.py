@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -15,13 +14,14 @@ from docflow.db import Database
 from docflow.llm.base import DocumentClassification
 from docflow.photos import PhotoInfo
 
-
 # ── Markers ───────────────────────────────────────────────────────────────────
 
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "unit: fast unit tests (no I/O, no network)")
-    config.addinivalue_line("markers", "e2e: end-to-end tests (real SQLite, real files, mocked external APIs)")
+    config.addinivalue_line(
+        "markers", "e2e: end-to-end tests (real SQLite, real files, mocked external APIs)"
+    )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

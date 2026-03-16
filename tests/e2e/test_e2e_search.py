@@ -9,7 +9,15 @@ from docflow.db import Database
 
 @pytest.mark.e2e
 class TestE2EFullTextSearch:
-    def _insert_doc(self, db: Database, run_id: int, ocr_text: str, doc_type: str, tags: list[str], filename: str):
+    def _insert_doc(
+        self,
+        db: Database,
+        run_id: int,
+        ocr_text: str,
+        doc_type: str,
+        tags: list[str],
+        filename: str,
+    ):
         return db.insert_document(
             run_id=run_id,
             original_photo_id=f"uid-{filename}",
@@ -24,9 +32,20 @@ class TestE2EFullTextSearch:
 
     def test_fts_finds_ocr_text(self, e2e_db: Database):
         run_id = e2e_db.create_run()
-        self._insert_doc(e2e_db, run_id, "Rechnung Vodafone GmbH 45 EUR", "Rechnung", ["Vodafone"], "vodafone")
-        self._insert_doc(e2e_db, run_id, "Kontoauszug Deutsche Bank Januar", "Kontoauszug", ["DeutscheBank"], "bank")
-        self._insert_doc(e2e_db, run_id, "Mietvertrag Berlin Kreuzberg", "Vertrag", ["Miete"], "miete")
+        self._insert_doc(
+            e2e_db, run_id, "Rechnung Vodafone GmbH 45 EUR", "Rechnung", ["Vodafone"], "vodafone"
+        )
+        self._insert_doc(
+            e2e_db,
+            run_id,
+            "Kontoauszug Deutsche Bank Januar",
+            "Kontoauszug",
+            ["DeutscheBank"],
+            "bank",
+        )
+        self._insert_doc(
+            e2e_db, run_id, "Mietvertrag Berlin Kreuzberg", "Vertrag", ["Miete"], "miete"
+        )
 
         results = e2e_db.search_documents("Vodafone")
         assert len(results) == 1
@@ -75,7 +94,12 @@ class TestE2EFullTextSearch:
         run_id = e2e_db.create_run()
         for i in range(5):
             self._insert_doc(
-                e2e_db, run_id, f"Rechnung Amazon Bestellung {i}", "Rechnung", ["Amazon"], f"amz_{i}"
+                e2e_db,
+                run_id,
+                f"Rechnung Amazon Bestellung {i}",
+                "Rechnung",
+                ["Amazon"],
+                f"amz_{i}",
             )
         self._insert_doc(e2e_db, run_id, "Kontoauszug DKB", "Kontoauszug", [], "dkb")
 

@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -46,8 +45,9 @@ class TestE2EScheduler:
 
     def test_scheduler_trigger_hour_minute(self, e2e_settings: Settings):
         """Cron trigger reflects configured hour/minute."""
-        from docflow.scheduler import start_scheduler
         from apscheduler.triggers.cron import CronTrigger
+
+        from docflow.scheduler import start_scheduler
 
         settings = e2e_settings.model_copy(update={"schedule_hour": 3, "schedule_minute": 30})
         scheduler = start_scheduler(settings)

@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import pytest
 
 from docflow.config import Settings
 from docflow.db import Database
-from docflow.llm.base import DocumentClassification
-from tests.conftest import FAKE_CLASSIFICATION, make_mock_llm
+from tests.conftest import make_mock_llm
 
 
 @pytest.fixture
@@ -48,6 +47,7 @@ def e2e_llm():
 @pytest.fixture
 def fake_jpeg(e2e_dir: Path) -> Path:
     from PIL import Image
+
     path = e2e_dir / "fake_scan.jpg"
     img = Image.new("RGB", (200, 100), color=(240, 240, 240))
     img.save(path, format="JPEG")

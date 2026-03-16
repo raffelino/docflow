@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     )
 
     # ── Photos ────────────────────────────────────────────────────────────────
+    photos_source: Literal["album", "all"] = "album"
     photos_album: str = "Dokumente"
 
     # ── Output ────────────────────────────────────────────────────────────────
@@ -53,9 +54,7 @@ class Settings(BaseSettings):
 
     # ── Storage ───────────────────────────────────────────────────────────────
     storage_backend: Literal["local", "icloud", "s3"] = "local"
-    icloud_docflow_path: Path = Path(
-        "~/Library/Mobile Documents/com~apple~CloudDocs/DocFlow"
-    )
+    icloud_docflow_path: Path = Path("~/Library/Mobile Documents/com~apple~CloudDocs/DocFlow")
     s3_bucket: str = ""
     s3_prefix: str = "docflow/"
     aws_access_key_id: str = ""

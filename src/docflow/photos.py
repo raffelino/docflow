@@ -6,6 +6,8 @@ Gracefully degrades when osxphotos is unavailable (non-macOS environments).
 from __future__ import annotations
 
 import logging
+import subprocess
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -50,18 +52,64 @@ class PhotosLibrary:
         logger.info("Photos library opened")
 
     def _to_photo_info(self, p) -> PhotoInfo:
-        """Convert an osxphotos photo object to PhotoInfo."""
+        """Convert an osxphotos photo object to PhotoInfo.
+
+        Always exports via AppleScript to get a universally readable JPEG,
+        avoiding HEIC compatibility issues with Pillow/img2pdf.
+        Falls back to the local path only for non-HEIC formats that exist locally.
+        """
         path: Path | None = None
-        if p.path:
-            path = Path(p.path)
-        elif p.path_edited:
-            path = Path(p.path_edited)
+
+        # Try local path for non-HEIC files first
+        local_path = Path(p.path) if p.path else (Path(p.path_edited) if p.path_edited else None)
+        if local_path and local_path.exists() and local_path.suffix.lower() not in (".heic", ".heif"):
+            path = local_path
+        else:
+            # Export via AppleScript (converts HEIC to JPEG, downloads from iCloud)
+            path = self._export_cloud_photo(p)
+
         return PhotoInfo(
             uuid=p.uuid,
             filename=p.filename,
             path=path,
             original_filename=p.original_filename or p.filename,
         )
+
+    @staticmethod
+    def _export_cloud_photo(photo) -> Path | None:
+        """Export an iCloud-only photo via Photos.app AppleScript."""
+        try:
+            export_dir = Path(tempfile.mkdtemp(prefix="docflow_export_"))
+            script = (
+                'tell application "Photos"\n'
+                f'  set thePhoto to media item id "{photo.uuid}"\n'
+                f'  set thePath to POSIX file "{export_dir}"\n'
+                "  export {thePhoto} to thePath\n"
+                "end tell"
+            )
+            result = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True, text=True, timeout=60,
+            )
+            if result.returncode != 0:
+                logger.warning(
+                    "AppleScript export failed",
+                    uuid=photo.uuid,
+                    stderr=result.stderr.strip(),
+                )
+                return None
+
+            exported = list(export_dir.iterdir())
+            if exported:
+                logger.info(
+                    "Exported iCloud photo",
+                    uuid=photo.uuid,
+                    path=str(exported[0]),
+                )
+                return exported[0]
+        except Exception as e:
+            logger.warning("Cloud photo export error", uuid=photo.uuid, error=str(e))
+        return None
 
     def get_photos_in_album(self, album_name: str) -> list[PhotoInfo]:
         """Return all photos in the named album."""

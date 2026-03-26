@@ -1,4 +1,4 @@
-"""E2E: full FastAPI app — hit all routes, assert responses."""
+"""E2E: full FastAPI app — hit all JSON API routes, assert responses."""
 
 from __future__ import annotations
 
@@ -32,19 +32,24 @@ def _client_and_db(e2e_dir: Path) -> tuple[TestClient, Database, Settings]:
 class TestE2EWebApp:
     def test_dashboard_empty(self, e2e_dir: Path):
         client, db, _ = _client_and_db(e2e_dir)
-        resp = client.get("/")
+        resp = client.get("/api/runs")
         assert resp.status_code == 200
-        assert "DocFlow" in resp.text
-        assert "Noch keine Läufe" in resp.text
+        data = resp.json()
+        assert isinstance(data, list)
+        assert len(data) == 0
 
     def test_dashboard_with_runs(self, e2e_dir: Path):
         client, db, _ = _client_and_db(e2e_dir)
         run_id = db.create_run()
         db.finish_run(run_id, "success", 2, 2, 0, "log data")
 
-        resp = client.get("/")
+        resp = client.get("/api/runs")
         assert resp.status_code == 200
-        assert "success" in resp.text.lower() or "OK" in resp.text
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["status"] == "success"
+        assert data[0]["photos_found"] == 2
+        assert data[0]["docs_processed"] == 2
 
     def test_run_detail_with_docs(self, e2e_dir: Path):
         client, db, _ = _client_and_db(e2e_dir)
@@ -62,16 +67,21 @@ class TestE2EWebApp:
             saved_path="/tmp/vodafone.pdf",
         )
 
-        resp = client.get(f"/runs/{run_id}")
-        assert resp.status_code == 200
-        assert "Vodafone" in resp.text
-        assert "some log" in resp.text
+        run = client.get(f"/api/runs/{run_id}").json()
+        assert run["status"] == "success"
+        assert "some log" in run["log"]
+
+        docs = client.get(f"/api/documents?run_id={run_id}").json()
+        assert len(docs) == 1
+        assert "Vodafone" in docs[0]["tags_list"]
 
     def test_documents_empty(self, e2e_dir: Path):
         client, db, _ = _client_and_db(e2e_dir)
-        resp = client.get("/documents")
+        resp = client.get("/api/documents")
         assert resp.status_code == 200
-        assert "Noch keine Dokumente" in resp.text
+        data = resp.json()
+        assert isinstance(data, list)
+        assert len(data) == 0
 
     def test_documents_list(self, e2e_dir: Path):
         client, db, _ = _client_and_db(e2e_dir)
@@ -91,12 +101,13 @@ class TestE2EWebApp:
             email_subject="Ihre Bestellung",
         )
 
-        resp = client.get("/documents")
+        resp = client.get("/api/documents")
         assert resp.status_code == 200
-        assert "Lieferschein" in resp.text
-        assert "Amazon" in resp.text
-        # Email source icon should appear
-        assert "✉" in resp.text or "E-Mail" in resp.text
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["doc_type"] == "Lieferschein"
+        assert "Amazon" in data[0]["tags_list"]
+        assert data[0]["source"] == "email"
 
     def test_documents_search(self, e2e_dir: Path):
         client, db, _ = _client_and_db(e2e_dir)
@@ -124,11 +135,13 @@ class TestE2EWebApp:
             saved_path="/tmp/d.pdf",
         )
 
-        resp = client.get("/documents?q=Telekom")
+        resp = client.get("/api/documents?q=Telekom")
         assert resp.status_code == 200
-        assert "Telekom" in resp.text
+        data = resp.json()
+        assert len(data) == 1
+        assert "Telekom" in data[0]["tags_list"]
         # DKB should not appear in filtered results
-        assert "DKB" not in resp.text
+        assert all("DKB" not in d.get("doc_type", "") for d in data)
 
     def test_documents_filter_by_source(self, e2e_dir: Path):
         client, db, _ = _client_and_db(e2e_dir)
@@ -158,10 +171,12 @@ class TestE2EWebApp:
             source="email",
         )
 
-        resp = client.get("/documents?source=email")
+        resp = client.get("/api/documents?source=email")
         assert resp.status_code == 200
+        data = resp.json()
         # Only email doc should be visible
-        assert "Rechnung" in resp.text
+        assert all(d["source"] == "email" for d in data)
+        assert any(d["doc_type"] == "Rechnung" for d in data)
 
     def test_api_runs_json(self, e2e_dir: Path):
         client, db, _ = _client_and_db(e2e_dir)

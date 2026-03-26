@@ -82,6 +82,7 @@ MIGRATIONS = [
     "ALTER TABLE documents ADD COLUMN email_date TIMESTAMP",
     "ALTER TABLE documents ADD COLUMN storage_backend TEXT",
     "ALTER TABLE documents ADD COLUMN cloud_path TEXT",
+    "ALTER TABLE documents ADD COLUMN file_hash TEXT",
 ]
 
 
@@ -182,6 +183,7 @@ class Database:
         email_date: datetime | None = None,
         storage_backend: str | None = None,
         cloud_path: str | None = None,
+        file_hash: str | None = None,
     ) -> int:
         with self._connect() as conn:
             cur = conn.execute(
@@ -189,9 +191,9 @@ class Database:
                    (run_id, original_photo_id, original_filename, ocr_text,
                     llm_provider, doc_type, tags, suggested_filename, saved_path, created_at,
                     source, email_subject, email_sender, email_date,
-                    storage_backend, cloud_path)
+                    storage_backend, cloud_path, file_hash)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                           ?, ?, ?, ?, ?, ?)""",
+                           ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     run_id,
                     original_photo_id,
@@ -209,6 +211,7 @@ class Database:
                     email_date,
                     storage_backend,
                     cloud_path,
+                    file_hash,
                 ),
             )
             return cur.lastrowid  # type: ignore[return-value]
@@ -258,6 +261,25 @@ class Database:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
             return dict(row) if row else None
+
+    def document_exists(self, photo_id: str | None = None, file_hash: str | None = None) -> bool:
+        """Check if a document with the given photo UUID or file hash already exists."""
+        with self._connect() as conn:
+            if photo_id:
+                row = conn.execute(
+                    "SELECT 1 FROM documents WHERE original_photo_id = ? LIMIT 1",
+                    (photo_id,),
+                ).fetchone()
+                if row:
+                    return True
+            if file_hash:
+                row = conn.execute(
+                    "SELECT 1 FROM documents WHERE file_hash = ? LIMIT 1",
+                    (file_hash,),
+                ).fetchone()
+                if row:
+                    return True
+        return False
 
     def list_doc_types(self) -> list[str]:
         with self._connect() as conn:

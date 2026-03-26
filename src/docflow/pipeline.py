@@ -10,6 +10,7 @@ Orchestrates:
 
 from __future__ import annotations
 
+import hashlib
 import io
 import re
 import tempfile
@@ -36,35 +37,66 @@ def _safe_filename(name: str) -> str:
     return name[:200] or "document.pdf"
 
 
+MAX_DIMENSION = 2000
+JPEG_QUALITY = 85
+
+
+def _optimize_image(image_path: Path) -> bytes:
+    """Resize and compress an image, return optimized JPEG bytes."""
+    img = Image.open(image_path)
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+
+    # Resize if larger than MAX_DIMENSION on either side
+    w, h = img.size
+    if w > MAX_DIMENSION or h > MAX_DIMENSION:
+        ratio = min(MAX_DIMENSION / w, MAX_DIMENSION / h)
+        new_size = (int(w * ratio), int(h * ratio))
+        img = img.resize(new_size, Image.LANCZOS)
+        logger.debug("Image resized", original=f"{w}x{h}", new=f"{new_size[0]}x{new_size[1]}")
+
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    return buf.getvalue()
+
+
 def _image_to_pdf_bytes(image_path: Path) -> bytes:
-    """Convert an image file to a single-page PDF in memory."""
+    """Optimize an image and convert to a compact single-page PDF."""
+    optimized = _optimize_image(image_path)
     try:
         import img2pdf  # type: ignore
 
-        return img2pdf.convert(str(image_path))
+        return img2pdf.convert(io.BytesIO(optimized))
     except Exception:
-        # Fallback: use Pillow to save as PDF
-        img = Image.open(image_path)
+        img = Image.open(io.BytesIO(optimized))
         buf = io.BytesIO()
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
         img.save(buf, format="PDF")
         return buf.getvalue()
 
 
 def _image_bytes_to_pdf_bytes(data: bytes) -> bytes:
-    """Convert raw image bytes to PDF bytes."""
-    buf = io.BytesIO(data)
+    """Convert raw image bytes to an optimized PDF."""
+    # Save to temp, optimize, then convert
+    img = Image.open(io.BytesIO(data))
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+
+    w, h = img.size
+    if w > MAX_DIMENSION or h > MAX_DIMENSION:
+        ratio = min(MAX_DIMENSION / w, MAX_DIMENSION / h)
+        img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+
+    opt_buf = io.BytesIO()
+    img.save(opt_buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    opt_bytes = opt_buf.getvalue()
+
     try:
         import img2pdf  # type: ignore
 
-        return img2pdf.convert(buf)
+        return img2pdf.convert(io.BytesIO(opt_bytes))
     except Exception:
-        img = Image.open(io.BytesIO(data))
         out = io.BytesIO()
-        if img.mode in ("RGBA", "P"):
-            img = img.convert("RGB")
-        img.save(out, format="PDF")
+        Image.open(io.BytesIO(opt_bytes)).save(out, format="PDF")
         return out.getvalue()
 
 
@@ -129,8 +161,9 @@ class Pipeline:
 
         for photo in photos:
             try:
-                await self._process_photo(photo, run_id, log)
-                docs_processed += 1
+                processed = await self._process_photo(photo, run_id, log)
+                if processed:
+                    docs_processed += 1
             except Exception as e:
                 log(f"ERROR processing photo {photo.filename}: {e}")
                 errors += 1
@@ -160,15 +193,27 @@ class Pipeline:
         photo: PhotoInfo,
         run_id: int,
         log,
-    ) -> None:
+    ) -> bool:
+        """Process a single photo. Returns True if processed, False if skipped."""
         log(f"Processing photo: {photo.filename}")
 
-        # OCR
-        if photo.path and photo.path.exists():
-            ocr_text = await extract_text(photo.path)
-        else:
-            log(f"  WARNING: No path for photo {photo.filename}, skipping OCR")
-            ocr_text = ""
+        # Duplicate check by UUID
+        if self.db.document_exists(photo_id=photo.uuid):
+            log(f"  SKIP: Already processed (UUID {photo.uuid})")
+            return False
+
+        # Check local file
+        if not photo.path or not photo.path.exists():
+            log(f"  SKIP: No local file for photo {photo.filename} (iCloud download failed?)")
+            return False
+
+        # Compute file hash for dedup
+        file_hash = hashlib.sha256(photo.path.read_bytes()).hexdigest()
+        if self.db.document_exists(file_hash=file_hash):
+            log(f"  SKIP: Already processed (identical file hash)")
+            return False
+
+        ocr_text = await extract_text(photo.path)
 
         log(f"  OCR: {len(ocr_text)} chars extracted")
 
@@ -187,13 +232,9 @@ class Pipeline:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             tmp_path = Path(tmp.name)
 
+        is_temp_export = str(photo.path).startswith(tempfile.gettempdir())
         try:
-            if photo.path and photo.path.exists():
-                pdf_bytes = _image_to_pdf_bytes(photo.path)
-            else:
-                # Placeholder PDF for photos without a path
-                pdf_bytes = b"%PDF-1.4\n1 0 obj<</Type /Catalog /Pages 2 0 R>>endobj\n"
-
+            pdf_bytes = _image_to_pdf_bytes(photo.path)
             tmp_path.write_bytes(pdf_bytes)
 
             # Save via storage backend
@@ -201,6 +242,13 @@ class Pipeline:
             log(f"  Saved to: {saved_path}")
         finally:
             tmp_path.unlink(missing_ok=True)
+            # Clean up AppleScript-exported temp files
+            if is_temp_export:
+                photo.path.unlink(missing_ok=True)
+                parent = photo.path.parent
+                if parent.name.startswith("docflow_export_"):
+                    import shutil
+                    shutil.rmtree(parent, ignore_errors=True)
 
         # DB
         self.db.insert_document(
@@ -215,7 +263,9 @@ class Pipeline:
             saved_path=saved_path,
             source="photos",
             storage_backend=self.storage.name,
+            file_hash=file_hash,
         )
+        return True
 
     async def _process_emails(self, run_id: int, log) -> tuple[int, int]:
         """Process email attachments. Returns (docs_processed, errors)."""

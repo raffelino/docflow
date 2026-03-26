@@ -7,13 +7,9 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 router = APIRouter()
-
-
-def _templates(request: Request):
-    return request.app.state.templates
 
 
 def _db(request: Request):
@@ -41,82 +37,6 @@ def _enrich(doc: dict) -> dict:
     return doc
 
 
-# ── Dashboard ─────────────────────────────────────────────────────────────────
-
-
-@router.get("/", response_class=HTMLResponse)
-async def index(request: Request):
-    db = _db(request)
-    runs = db.list_runs(limit=10)
-    return _templates(request).TemplateResponse(
-        "index.html",
-        {"request": request, "runs": runs},
-    )
-
-
-# ── Run detail ────────────────────────────────────────────────────────────────
-
-
-@router.get("/runs/{run_id}", response_class=HTMLResponse)
-async def run_detail(request: Request, run_id: int):
-    db = _db(request)
-    run = db.get_run(run_id)
-    if not run:
-        return HTMLResponse("Run not found", status_code=404)
-    docs = db.list_documents(limit=200)
-    docs = [d for d in docs if d.get("run_id") == run_id]
-    docs = [_enrich(d) for d in docs]
-    return _templates(request).TemplateResponse(
-        "run_detail.html",
-        {"request": request, "run": run, "docs": docs},
-    )
-
-
-# ── Documents ─────────────────────────────────────────────────────────────────
-
-
-@router.get("/documents", response_class=HTMLResponse)
-async def documents(
-    request: Request,
-    q: str | None = None,
-    doc_type: str | None = None,
-    tag: str | None = None,
-    source: str | None = None,
-    offset: int = 0,
-    limit: int = 50,
-):
-    db = _db(request)
-
-    if q:
-        docs = db.search_documents(q, limit=limit)
-    else:
-        docs = db.list_documents(
-            limit=limit,
-            offset=offset,
-            doc_type=doc_type or None,
-            tag=tag or None,
-            source=source or None,
-        )
-
-    docs = [_enrich(d) for d in docs]
-    doc_types = db.list_doc_types()
-
-    return _templates(request).TemplateResponse(
-        "documents.html",
-        {
-            "request": request,
-            "docs": docs,
-            "doc_types": doc_types,
-            "q": q or "",
-            "selected_type": doc_type or "",
-            "selected_tag": tag or "",
-            "selected_source": source or "",
-            "offset": offset,
-            "limit": limit,
-        },
-    )
-
-
 # ── Trigger manual run ────────────────────────────────────────────────────────
 
 
@@ -141,9 +61,8 @@ async def trigger_run(request: Request, background_tasks: BackgroundTasks):
     return RedirectResponse("/", status_code=303)
 
 
-# ── Settings ──────────────────────────────────────────────────────────────────
+# ── Settings fields ────────────────────────────────────────────────────────────
 
-# Fields exposed in the settings UI (secrets are excluded)
 _SETTINGS_FIELDS: list[str] = [
     "photos_source",
     "photos_album",
@@ -184,46 +103,7 @@ def _write_env_file(settings, env_path: Path) -> None:
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-@router.get("/settings", response_class=HTMLResponse)
-async def settings_page(request: Request, saved: bool = False):
-    return _templates(request).TemplateResponse(
-        "settings.html",
-        {"request": request, "s": _settings(request), "saved": saved},
-    )
-
-
-@router.post("/settings")
-async def settings_save(request: Request):
-    form = await request.form()
-    settings = _settings(request)
-
-    updates: dict = {}
-    for field in _SETTINGS_FIELDS:
-        if field == "email_enabled":
-            updates[field] = form.get("email_enabled") == "true"
-        elif field in ("schedule_hour", "schedule_minute", "email_imap_port", "web_port"):
-            raw = form.get(field, "")
-            if raw != "":
-                updates[field] = int(raw)
-        elif field in ("output_dir", "icloud_docflow_path"):
-            raw = form.get(field, "")
-            if raw:
-                updates[field] = Path(raw).expanduser().resolve()
-        else:
-            val = form.get(field, "")
-            if val is not None:
-                updates[field] = val
-
-    new_settings = settings.model_copy(update=updates)
-    request.app.state.settings = new_settings
-
-    env_path = Path.cwd() / ".env"
-    _write_env_file(new_settings, env_path)
-
-    return RedirectResponse("/settings?saved=1", status_code=303)
-
-
-# ── API: JSON endpoints ────────────────────────────────────────────────────────
+# ── API: Runs ─────────────────────────────────────────────────────────────────
 
 
 @router.get("/api/runs")
@@ -239,12 +119,16 @@ async def api_run(request: Request, run_id: int):
     return run
 
 
+# ── API: Documents ────────────────────────────────────────────────────────────
+
+
 @router.get("/api/documents")
 async def api_documents(
     request: Request,
     q: str | None = None,
     doc_type: str | None = None,
     source: str | None = None,
+    run_id: int | None = None,
     limit: int = 50,
     offset: int = 0,
 ):
@@ -253,13 +137,14 @@ async def api_documents(
         docs = db.search_documents(q, limit=limit)
     else:
         docs = db.list_documents(limit=limit, offset=offset, doc_type=doc_type, source=source)
+    if run_id is not None:
+        docs = [d for d in docs if d.get("run_id") == run_id]
     return [_enrich(d) for d in docs]
 
 
-@router.get("/api/settings")
-async def api_settings(request: Request):
-    settings = _settings(request)
-    return {field: str(getattr(settings, field)) for field in _SETTINGS_FIELDS}
+@router.get("/api/doc-types")
+async def api_doc_types(request: Request):
+    return _db(request).list_doc_types()
 
 
 @router.get("/api/documents/{doc_id}")
@@ -268,3 +153,114 @@ async def api_document(request: Request, doc_id: int):
     if not doc:
         return JSONResponse({"error": "not found"}, status_code=404)
     return _enrich(doc)
+
+
+@router.get("/api/documents/{doc_id}/file")
+async def api_document_file(request: Request, doc_id: int):
+    """Serve the stored PDF file for a document."""
+    doc = _db(request).get_document(doc_id)
+    if not doc:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    file_path = Path(doc.get("saved_path") or "")
+    if not file_path.is_file():
+        return JSONResponse({"error": "file not found"}, status_code=404)
+    return FileResponse(
+        file_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": "inline"},
+    )
+
+
+# ── API: Settings ─────────────────────────────────────────────────────────────
+
+
+@router.get("/api/settings")
+async def api_settings(request: Request):
+    settings = _settings(request)
+    return {field: str(getattr(settings, field)) for field in _SETTINGS_FIELDS}
+
+
+@router.post("/api/settings")
+async def api_settings_save(request: Request):
+    data = await request.json()
+    settings = _settings(request)
+
+    updates: dict = {}
+    for field in _SETTINGS_FIELDS:
+        if field not in data:
+            continue
+        val = data[field]
+        if field == "email_enabled":
+            updates[field] = val in (True, "true", "True")
+        elif field in ("schedule_hour", "schedule_minute", "email_imap_port", "web_port"):
+            updates[field] = int(val)
+        elif field in ("output_dir", "icloud_docflow_path"):
+            if val:
+                updates[field] = Path(val).expanduser().resolve()
+        else:
+            updates[field] = val
+
+    new_settings = settings.model_copy(update=updates)
+    request.app.state.settings = new_settings
+
+    env_path = Path.cwd() / ".env"
+    _write_env_file(new_settings, env_path)
+
+    return {"status": "ok"}
+
+
+# ── API: Ollama ───────────────────────────────────────────────────────────────
+
+
+@router.get("/api/ollama/models")
+async def api_ollama_models(request: Request):
+    """Fetch available models from the configured Ollama instance."""
+    import httpx
+
+    settings = _settings(request)
+    base_url = str(getattr(settings, "ollama_base_url", "http://localhost:11434"))
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{base_url}/api/tags")
+            resp.raise_for_status()
+            data = resp.json()
+            return [m["name"] for m in data.get("models", [])]
+    except Exception:
+        return []
+
+
+# ── API: Documentation ────────────────────────────────────────────────────────
+
+_DOCS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "docs"
+
+
+@router.get("/api/docs")
+async def api_docs_list():
+    """List available documentation files."""
+    if not _DOCS_DIR.is_dir():
+        return []
+    return [
+        {"slug": p.stem, "title": _extract_title(p), "filename": p.name}
+        for p in sorted(_DOCS_DIR.glob("*.md"))
+    ]
+
+
+@router.get("/api/docs/{slug}")
+async def api_docs_detail(slug: str):
+    """Return the markdown content of a documentation file."""
+    md_path = _DOCS_DIR / f"{slug}.md"
+    if not md_path.is_file():
+        return JSONResponse({"error": "not found"}, status_code=404)
+    content = md_path.read_text(encoding="utf-8")
+    return {"slug": slug, "title": _extract_title(md_path), "content": content}
+
+
+def _extract_title(path: Path) -> str:
+    """Extract the first H1 heading from a markdown file, or use the filename."""
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("# "):
+                return line[2:].strip()
+    except Exception:
+        pass
+    return path.stem.replace("_", " ").replace("-", " ").title()

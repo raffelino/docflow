@@ -47,3 +47,19 @@ coverage.xml
 
 # Logs
 *.log
+
+# Node.js
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# VitePress build output
+docs-dist/
+docs/.vitepress/cache/
+
+# Built frontend & docs (generated assets)
+src/docflow/web/static/
+src/docflow/web/docs-static/
+
+# Env backups
+.env.bak

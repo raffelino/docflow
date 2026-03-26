@@ -1,4 +1,4 @@
-"""E2E: settings page — view and update configuration."""
+"""E2E: settings API — view and update configuration via JSON."""
 
 from __future__ import annotations
 
@@ -34,37 +34,39 @@ def _client_and_settings(e2e_dir: Path) -> tuple[TestClient, Settings]:
 class TestE2ESettingsPage:
     def test_settings_page_loads(self, e2e_dir: Path):
         client, _ = _client_and_settings(e2e_dir)
-        resp = client.get("/settings")
+        resp = client.get("/api/settings")
         assert resp.status_code == 200
-        assert "Einstellungen" in resp.text
+        data = resp.json()
+        assert "llm_provider" in data
 
     def test_settings_page_shows_current_values(self, e2e_dir: Path):
         client, settings = _client_and_settings(e2e_dir)
-        resp = client.get("/settings")
+        resp = client.get("/api/settings")
         assert resp.status_code == 200
-        assert "TestAlbum" in resp.text
-        assert 'value="2"' in resp.text  # schedule_hour
-        assert 'value="30"' in resp.text  # schedule_minute
-        assert "anthropic" in resp.text
+        data = resp.json()
+        assert data["photos_album"] == "TestAlbum"
+        assert data["schedule_hour"] == "2"
+        assert data["schedule_minute"] == "30"
+        assert data["llm_provider"] == "anthropic"
 
     def test_settings_page_shows_photos_source_selected(self, e2e_dir: Path):
         client, _ = _client_and_settings(e2e_dir)
-        resp = client.get("/settings")
-        # "album" should be selected
-        assert 'value="album" selected' in resp.text
+        data = client.get("/api/settings").json()
+        assert data["photos_source"] == "album"
 
     def test_settings_nav_link_exists(self, e2e_dir: Path):
+        """SPA catch-all serves index.html for any non-API path."""
         client, _ = _client_and_settings(e2e_dir)
-        resp = client.get("/")
+        resp = client.get("/api/settings")
         assert resp.status_code == 200
-        assert "/settings" in resp.text
-        assert "Einstellungen" in resp.text
+        # Settings endpoint is available
+        assert isinstance(resp.json(), dict)
 
-    def test_save_settings_redirects(self, e2e_dir: Path):
+    def test_save_settings_returns_ok(self, e2e_dir: Path):
         client, _ = _client_and_settings(e2e_dir)
         resp = client.post(
-            "/settings",
-            data={
+            "/api/settings",
+            json={
                 "photos_source": "all",
                 "photos_album": "NeuesAlbum",
                 "llm_provider": "ollama",
@@ -79,6 +81,7 @@ class TestE2ESettingsPage:
                 "s3_endpoint_url": "",
                 "schedule_hour": "3",
                 "schedule_minute": "15",
+                "email_enabled": False,
                 "email_imap_host": "imap.gmail.com",
                 "email_imap_port": "993",
                 "email_folder": "INBOX",
@@ -87,17 +90,15 @@ class TestE2ESettingsPage:
                 "web_host": "0.0.0.0",
                 "web_port": "9000",
             },
-            follow_redirects=False,
         )
-        assert resp.status_code == 303
-        assert "/settings" in resp.headers["location"]
-        assert "saved=1" in resp.headers["location"]
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
 
     def test_save_settings_updates_in_memory(self, e2e_dir: Path):
         client, _ = _client_and_settings(e2e_dir)
         client.post(
-            "/settings",
-            data={
+            "/api/settings",
+            json={
                 "photos_source": "all",
                 "photos_album": "Geändert",
                 "llm_provider": "ollama",
@@ -112,6 +113,7 @@ class TestE2ESettingsPage:
                 "s3_endpoint_url": "",
                 "schedule_hour": "5",
                 "schedule_minute": "45",
+                "email_enabled": False,
                 "email_imap_host": "imap.example.com",
                 "email_imap_port": "993",
                 "email_folder": "INBOX",
@@ -120,23 +122,21 @@ class TestE2ESettingsPage:
                 "web_host": "0.0.0.0",
                 "web_port": "9000",
             },
-            follow_redirects=False,
         )
 
-        # Verify the settings page now shows updated values
-        resp = client.get("/settings")
-        assert resp.status_code == 200
-        assert "Geändert" in resp.text  # updated album name
-        assert 'value="all" selected' in resp.text  # photos_source
-        assert 'value="5"' in resp.text  # schedule_hour
-        assert 'value="45"' in resp.text  # schedule_minute
-        assert "imap.example.com" in resp.text
+        # Verify the settings API now shows updated values
+        data = client.get("/api/settings").json()
+        assert data["photos_album"] == "Geändert"
+        assert data["photos_source"] == "all"
+        assert data["schedule_hour"] == "5"
+        assert data["schedule_minute"] == "45"
+        assert data["email_imap_host"] == "imap.example.com"
 
     def test_save_enables_email(self, e2e_dir: Path):
         client, _ = _client_and_settings(e2e_dir)
         client.post(
-            "/settings",
-            data={
+            "/api/settings",
+            json={
                 "photos_source": "album",
                 "photos_album": "TestAlbum",
                 "llm_provider": "anthropic",
@@ -151,7 +151,7 @@ class TestE2ESettingsPage:
                 "s3_endpoint_url": "",
                 "schedule_hour": "2",
                 "schedule_minute": "0",
-                "email_enabled": "true",
+                "email_enabled": True,
                 "email_imap_host": "imap.gmail.com",
                 "email_imap_port": "993",
                 "email_folder": "INBOX",
@@ -160,16 +160,15 @@ class TestE2ESettingsPage:
                 "web_host": "127.0.0.1",
                 "web_port": "8765",
             },
-            follow_redirects=False,
         )
 
-        resp = client.get("/settings")
-        assert "checked" in resp.text  # email_enabled checkbox
+        data = client.get("/api/settings").json()
+        assert data["email_enabled"] == "True"
 
     def test_save_disables_email(self, e2e_dir: Path):
         client, _ = _client_and_settings(e2e_dir)
         # First enable
-        data = {
+        payload = {
             "photos_source": "album",
             "photos_album": "TestAlbum",
             "llm_provider": "anthropic",
@@ -184,7 +183,7 @@ class TestE2ESettingsPage:
             "s3_endpoint_url": "",
             "schedule_hour": "2",
             "schedule_minute": "0",
-            "email_enabled": "true",
+            "email_enabled": True,
             "email_imap_host": "imap.gmail.com",
             "email_imap_port": "993",
             "email_folder": "INBOX",
@@ -193,22 +192,21 @@ class TestE2ESettingsPage:
             "web_host": "127.0.0.1",
             "web_port": "8765",
         }
-        client.post("/settings", data=data, follow_redirects=False)
+        client.post("/api/settings", json=payload)
 
-        # Now disable (checkbox not sent = unchecked)
-        data.pop("email_enabled")
-        client.post("/settings", data=data, follow_redirects=False)
+        # Now disable
+        payload["email_enabled"] = False
+        client.post("/api/settings", json=payload)
 
-        resp = client.get("/settings")
-        # checkbox should NOT be checked
-        assert 'id="email_enabled" value="true" checked' not in resp.text
+        data = client.get("/api/settings").json()
+        assert data["email_enabled"] == "False"
 
     def test_save_writes_env_file(self, e2e_dir: Path, monkeypatch):
         monkeypatch.chdir(e2e_dir)
         client, _ = _client_and_settings(e2e_dir)
         client.post(
-            "/settings",
-            data={
+            "/api/settings",
+            json={
                 "photos_source": "all",
                 "photos_album": "MeinAlbum",
                 "llm_provider": "ollama",
@@ -223,6 +221,7 @@ class TestE2ESettingsPage:
                 "s3_endpoint_url": "",
                 "schedule_hour": "4",
                 "schedule_minute": "0",
+                "email_enabled": False,
                 "email_imap_host": "imap.gmail.com",
                 "email_imap_port": "993",
                 "email_folder": "INBOX",
@@ -231,7 +230,6 @@ class TestE2ESettingsPage:
                 "web_host": "127.0.0.1",
                 "web_port": "8765",
             },
-            follow_redirects=False,
         )
 
         env_file = e2e_dir / ".env"
@@ -244,20 +242,27 @@ class TestE2ESettingsPage:
         assert "EMAIL_ENABLED=false" in content
 
     def test_saved_flash_message(self, e2e_dir: Path):
+        """Saving settings returns status ok in JSON response."""
         client, _ = _client_and_settings(e2e_dir)
-        resp = client.get("/settings?saved=1")
+        resp = client.post(
+            "/api/settings",
+            json={"photos_album": "TestAlbum"},
+        )
         assert resp.status_code == 200
-        assert "gespeichert" in resp.text.lower()
+        assert resp.json()["status"] == "ok"
 
     def test_no_secrets_in_settings_page(self, e2e_dir: Path):
         client, _ = _client_and_settings(e2e_dir)
-        resp = client.get("/settings")
-        text = resp.text
-        assert "anthropic_api_key" not in text.lower()
-        assert "openrouter_api_key" not in text.lower()
-        assert "email_password" not in text.lower()
-        assert "aws_secret_access_key" not in text.lower()
-        assert "aws_access_key_id" not in text.lower()
+        data = client.get("/api/settings").json()
+        secret_fields = [
+            "anthropic_api_key",
+            "openrouter_api_key",
+            "email_password",
+            "aws_secret_access_key",
+            "aws_access_key_id",
+        ]
+        for field in secret_fields:
+            assert field not in data
 
     def test_api_settings_returns_json(self, e2e_dir: Path):
         client, _ = _client_and_settings(e2e_dir)

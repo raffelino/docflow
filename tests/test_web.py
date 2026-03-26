@@ -42,10 +42,10 @@ class TestWebRoutes:
         resp = client.get("/documents")
         assert resp.status_code == 200
 
-    def test_run_detail_404_for_missing(self, tmp_dir: Path):
+    def test_api_run_404_for_missing(self, tmp_dir: Path):
         app, _ = _make_app(tmp_dir)
         client = TestClient(app)
-        resp = client.get("/runs/9999")
+        resp = client.get("/api/runs/9999")
         assert resp.status_code == 404
 
     def test_run_detail_shows_run(self, tmp_dir: Path):
@@ -145,7 +145,7 @@ class TestWebRoutes:
         assert resp.status_code == 303
         assert resp.headers["location"] == "/"
 
-    def test_documents_filter_by_type(self, tmp_dir: Path):
+    def test_api_documents_filter_by_type(self, tmp_dir: Path):
         app, settings = _make_app(tmp_dir)
         db = Database(settings.db_path)
         run_id = db.create_run()
@@ -173,6 +173,8 @@ class TestWebRoutes:
         )
 
         client = TestClient(app)
-        resp = client.get("/documents?doc_type=Rechnung")
+        resp = client.get("/api/documents?doc_type=Rechnung")
         assert resp.status_code == 200
-        assert "Rechnung" in resp.text
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["doc_type"] == "Rechnung"

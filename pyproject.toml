@@ -18,6 +18,7 @@ dependencies = [
     "img2pdf>=0.5.1",
     "aiofiles>=23.2.1",
     "python-multipart>=0.0.9",
+    "pypdf>=6.9.2",
 ]
 
 [project.optional-dependencies]

@@ -57,6 +57,8 @@ export async function getDocuments(params: {
   run_id?: number;
   limit?: number;
   offset?: number;
+  sort?: string;
+  order?: "asc" | "desc";
 }): Promise<Document[]> {
   const sp = new URLSearchParams();
   if (params.q) sp.set("q", params.q);
@@ -65,6 +67,8 @@ export async function getDocuments(params: {
   if (params.run_id) sp.set("run_id", String(params.run_id));
   if (params.limit) sp.set("limit", String(params.limit));
   if (params.offset) sp.set("offset", String(params.offset));
+  if (params.sort) sp.set("sort", params.sort);
+  if (params.order) sp.set("order", params.order);
   return fetchJSON(`${BASE}/documents?${sp}`);
 }
 
@@ -91,4 +95,10 @@ export async function saveSettings(data: Settings): Promise<void> {
 
 export async function triggerRun(): Promise<void> {
   await fetch("/runs/trigger", { method: "POST" });
+}
+
+/** Vorschaubild eines Dokuments. Liefert 404, wenn keine Datei vorliegt —
+ *  das <img> faengt das per onError ab. */
+export function thumbnailUrl(id: number, size = 96): string {
+  return `${BASE}/documents/${id}/thumbnail?size=${size}`;
 }

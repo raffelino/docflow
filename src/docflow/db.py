@@ -278,6 +278,16 @@ class Database:
             )
             return cur.lastrowid  # type: ignore[return-value]
 
+    # Erlaubte Sortierfelder. Als feste Zuordnung, weil der Spaltenname in das
+    # SQL interpoliert wird — Nutzereingaben duerfen dort nie direkt landen.
+    SORT_COLUMNS: dict[str, str] = {
+        "created_at": "created_at",
+        "doc_type": "doc_type",
+        "filename": "suggested_filename",
+        "source": "source",
+        "size": "file_size_bytes",
+    }
+
     def list_documents(
         self,
         limit: int = 50,
@@ -285,7 +295,11 @@ class Database:
         doc_type: str | None = None,
         tag: str | None = None,
         source: str | None = None,
+        sort: str = "created_at",
+        order: str = "desc",
     ) -> list[dict]:
+        spalte = self.SORT_COLUMNS.get(sort, "created_at")
+        richtung = "ASC" if str(order).lower() == "asc" else "DESC"
         with self._connect() as conn:
             clauses: list[str] = []
             params: list = []
@@ -300,7 +314,8 @@ class Database:
                 params.append(source)
             where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
             rows = conn.execute(
-                f"SELECT * FROM documents {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                f"SELECT * FROM documents {where} "
+                f"ORDER BY {spalte} {richtung}, id {richtung} LIMIT ? OFFSET ?",
                 [*params, limit, offset],
             ).fetchall()
             return [dict(r) for r in rows]

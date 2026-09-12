@@ -1,12 +1,44 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { getDocuments, getDocTypes, type Document } from "@/lib/api";
+import { getDocuments, getDocTypes, thumbnailUrl, type Document } from "@/lib/api";
 import { SourceBadge } from "@/components/SourceBadge";
 import { StorageBadge } from "@/components/StorageBadge";
 import { formatDate, truncate } from "@/lib/utils";
-import { Search, X, ChevronLeft, ChevronRight, Eye } from "lucide-react";
+import { Search, X, ChevronLeft, ChevronRight, Eye, ArrowUp, ArrowDown,
+  FileText } from "lucide-react";
 
 const LIMIT = 50;
+
+/** Vorschaubild mit Platzhalter.
+ *
+ *  Der Endpoint antwortet mit 404, wenn keine Datei vorliegt (aussortierte
+ *  Fotos und Videos haben keinen saved_path) oder sich kein Bild extrahieren
+ *  laesst. Statt eines kaputten Bildsymbols wird dann ein Platzhalter gezeigt.
+ */
+function DocThumb({ doc }: { doc: Document }) {
+  const [fehler, setFehler] = useState(false);
+
+  if (!doc.saved_path || fehler) {
+    return (
+      <div
+        className="h-12 w-12 rounded-md bg-muted flex items-center justify-center"
+        title="Keine Vorschau"
+      >
+        <FileText className="h-5 w-5 text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={thumbnailUrl(doc.id, 96)}
+      alt=""
+      loading="lazy"
+      onError={() => setFehler(true)}
+      className="h-12 w-12 rounded-md object-cover border border-border bg-muted"
+    />
+  );
+}
 
 export function DocumentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -19,6 +51,8 @@ export function DocumentsPage() {
   const docType = searchParams.get("doc_type") ?? "";
   const source = searchParams.get("source") ?? "";
   const offset = parseInt(searchParams.get("offset") ?? "0", 10);
+  const sort = searchParams.get("sort") ?? "created_at";
+  const order = (searchParams.get("order") ?? "desc") as "asc" | "desc";
 
   const fetchDocs = useCallback(() => {
     setLoading(true);
@@ -28,10 +62,12 @@ export function DocumentsPage() {
       source: source || undefined,
       limit: LIMIT,
       offset,
+      sort,
+      order,
     })
       .then(setDocs)
       .finally(() => setLoading(false));
-  }, [q, docType, source, offset]);
+  }, [q, docType, source, offset, sort, order]);
 
   useEffect(() => {
     fetchDocs();
@@ -50,6 +86,50 @@ export function DocumentsPage() {
     }
     next.delete("offset");
     setSearchParams(next);
+  };
+
+  const toggleSort = (feld: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (sort === feld) {
+      next.set("order", order === "asc" ? "desc" : "asc");
+    } else {
+      next.set("sort", feld);
+      next.set("order", "desc");
+    }
+    next.delete("offset");
+    setSearchParams(next);
+  };
+
+  // Die Volltextsuche sortiert nach Relevanz — dann sind Spaltenkoepfe inaktiv.
+  const sortierbar = !q;
+
+  const SortHeader = ({ feld, children }: { feld: string; children: React.ReactNode }) => {
+    if (!sortierbar) {
+      return (
+        <th className="px-6 py-3 text-left font-medium text-muted-foreground">
+          {children}
+        </th>
+      );
+    }
+    const aktiv = sort === feld;
+    return (
+      <th className="px-6 py-3 text-left font-medium text-muted-foreground">
+        <button
+          type="button"
+          onClick={() => toggleSort(feld)}
+          className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+          aria-sort={aktiv ? (order === "asc" ? "ascending" : "descending") : "none"}
+        >
+          {children}
+          {aktiv &&
+            (order === "asc" ? (
+              <ArrowUp className="h-3 w-3" />
+            ) : (
+              <ArrowDown className="h-3 w-3" />
+            ))}
+        </button>
+      </th>
+    );
   };
 
   const clearFilters = () => setSearchParams({});
@@ -130,24 +210,19 @@ export function DocumentsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">
-                      Quelle
+                    <th className="px-6 py-3 w-16 text-left font-medium text-muted-foreground">
+                      Vorschau
                     </th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">
-                      Dateiname
-                    </th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">
-                      Typ
-                    </th>
+                    <SortHeader feld="source">Quelle</SortHeader>
+                    <SortHeader feld="filename">Dateiname</SortHeader>
+                    <SortHeader feld="doc_type">Typ</SortHeader>
                     <th className="px-6 py-3 text-left font-medium text-muted-foreground">
                       Tags
                     </th>
                     <th className="px-6 py-3 text-left font-medium text-muted-foreground">
                       Speicher
                     </th>
-                    <th className="px-6 py-3 text-left font-medium text-muted-foreground">
-                      Erstellt
-                    </th>
+                    <SortHeader feld="created_at">Erstellt</SortHeader>
                     <th className="px-6 py-3 text-left font-medium text-muted-foreground">
                       Pfad
                     </th>
@@ -160,6 +235,9 @@ export function DocumentsPage() {
                       key={doc.id}
                       className="hover:bg-muted/30 transition-colors group"
                     >
+                      <td className="px-6 py-3">
+                        <DocThumb doc={doc} />
+                      </td>
                       <td className="px-6 py-3">
                         <SourceBadge source={doc.source ?? "photos"} />
                         {doc.email_subject && (

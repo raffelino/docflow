@@ -7,7 +7,9 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+
+from docflow.thumbnails import render_thumbnail
 
 router = APIRouter()
 
@@ -173,15 +175,52 @@ async def api_documents(
     run_id: int | None = None,
     limit: int = 50,
     offset: int = 0,
+    sort: str = "created_at",
+    order: str = "desc",
 ):
     db = _db(request)
     if q:
+        # Die Volltextsuche sortiert nach Relevanz (FTS5 rank); eine eigene
+        # Sortierung wuerde die Trefferqualitaet zunichtemachen.
         docs = db.search_documents(q, limit=limit)
     else:
-        docs = db.list_documents(limit=limit, offset=offset, doc_type=doc_type, source=source)
+        docs = db.list_documents(
+            limit=limit, offset=offset, doc_type=doc_type, source=source,
+            sort=sort, order=order,
+        )
     if run_id is not None:
         docs = [d for d in docs if d.get("run_id") == run_id]
     return [_enrich(d) for d in docs]
+
+
+@router.get("/api/documents/{doc_id}/thumbnail")
+async def api_document_thumbnail(request: Request, doc_id: int, size: int = 320):
+    """Vorschaubild eines Dokuments (JPEG) oder 404.
+
+    Die Datei wird ueber die DB aufgeloest, nie ueber einen Pfad aus der
+    Anfrage — sonst waere das ein Lesezugriff auf beliebige Dateien.
+    """
+    doc = _db(request).get_document(doc_id)
+    if not doc or not doc.get("saved_path"):
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    max_px = max(48, min(int(size), 1024))
+    settings = _settings(request)
+    bild = render_thumbnail(
+        Path(doc["saved_path"]),
+        cache_dir=Path(settings.output_dir) / ".thumbnails",
+        max_px=max_px,
+    )
+    if bild is None:
+        return JSONResponse({"error": "no preview"}, status_code=404)
+
+    return Response(
+        content=bild,
+        media_type="image/jpeg",
+        # Der Cache-Schluessel enthaelt die mtime der Quelle, langes
+        # Browser-Caching ist also unkritisch.
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 @router.get("/api/doc-types")

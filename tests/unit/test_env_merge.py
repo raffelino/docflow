@@ -141,3 +141,37 @@ class TestReadonlyFields:
         """Anzeigen ja, aendern nein — sonst wirkt die Maske kaputt."""
         for field in _READONLY_FIELDS:
             assert field in _SETTINGS_FIELDS
+
+
+@pytest.mark.unit
+class TestSortierung:
+    """Sortierfelder werden zugeordnet, nicht durchgereicht (SQL-Injection)."""
+
+    def test_nur_bekannte_felder(self):
+        from docflow.db import Database
+
+        assert "created_at" in Database.SORT_COLUMNS
+        assert "doc_type" in Database.SORT_COLUMNS
+        # der Spaltenname wird interpoliert, darum feste Zuordnung
+        assert "filename" in Database.SORT_COLUMNS
+        assert Database.SORT_COLUMNS["filename"] == "suggested_filename"
+
+    def test_unbekanntes_feld_faellt_auf_default(self, db):
+        db.list_documents(sort="'; DROP TABLE documents; --")
+        # kein Fehler, Tabelle steht noch
+        assert db.list_documents() == []
+
+    def test_richtung_wird_normalisiert(self, db, tmp_path):
+        for i in range(3):
+            db.insert_document(
+                run_id=db.create_run(), original_photo_id=f"u{i}",
+                original_filename=f"f{i}.jpg", ocr_text="x", llm_provider="test",
+                doc_type="Brief", tags=[], suggested_filename=f"f{i}.pdf",
+                saved_path=str(tmp_path / f"f{i}.pdf"),
+            )
+        auf = [d["id"] for d in db.list_documents(sort="created_at", order="asc")]
+        ab = [d["id"] for d in db.list_documents(sort="created_at", order="desc")]
+        assert auf == sorted(auf)
+        assert ab == sorted(ab, reverse=True)
+        # unsinnige Richtung -> absteigend
+        assert [d["id"] for d in db.list_documents(order="seitwaerts")] == ab

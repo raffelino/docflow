@@ -88,19 +88,61 @@ _SETTINGS_FIELDS: list[str] = [
     "web_port",
 ]
 
+# Diese Felder werden angezeigt, aber nicht ueber die UI geaendert:
+#   photos_source  ein versehentliches "all" schickt ~15.900 Aufnahmen durch OCR
+#                  und LLM — das soll eine bewusste Entscheidung in der .env sein
+#   llm_provider   fuer anthropic liegt kein Key vor, ein Umschalten bricht die
+#                  Klassifikation sofort
+#   web_host       Bindeadresse ist eine Sicherheitsentscheidung, nicht UI-Sache
+_READONLY_FIELDS: frozenset[str] = frozenset({
+    "photos_source",
+    "llm_provider",
+    "web_host",
+})
+
+
+def _format_env_value(val) -> str:
+    if isinstance(val, bool):
+        return "true" if val else "false"
+    return str(val)
+
 
 def _write_env_file(settings, env_path: Path) -> None:
-    """Write non-secret settings to a .env file."""
-    lines: list[str] = []
-    for field in _SETTINGS_FIELDS:
-        val = getattr(settings, field)
-        if isinstance(val, bool):
-            lines.append(f"{field.upper()}={'true' if val else 'false'}")
-        elif isinstance(val, Path):
-            lines.append(f"{field.upper()}={val}")
-        else:
-            lines.append(f"{field.upper()}={val}")
-    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    """Einstellungen in die .env schreiben — vorhandene Zeilen bleiben erhalten.
+
+    Wird **gemergt**, nicht ueberschrieben. Die .env enthaelt Werte, die hier
+    gar nicht vorkommen — vor allem ``OPENROUTER_API_KEY``. Ein vollstaendiges
+    Neuschreiben loescht sie, und dann scheitert der naechste Lauf an der
+    Klassifikation. Kommentare und Reihenfolge bleiben ebenfalls erhalten,
+    damit die Datei lesbar bleibt.
+    """
+    neue_werte = {
+        field.upper(): _format_env_value(getattr(settings, field))
+        for field in _SETTINGS_FIELDS
+    }
+
+    zeilen: list[str] = []
+    gesehen: set[str] = set()
+    if env_path.exists():
+        for zeile in env_path.read_text(encoding="utf-8").splitlines():
+            blank = zeile.strip()
+            if not blank or blank.startswith("#") or "=" not in blank:
+                # Kommentare und Leerzeilen unveraendert uebernehmen
+                zeilen.append(zeile)
+                continue
+            schluessel = blank.split("=", 1)[0].strip()
+            if schluessel in neue_werte:
+                zeilen.append(f"{schluessel}={neue_werte[schluessel]}")
+                gesehen.add(schluessel)
+            else:
+                # Fremder Eintrag (z. B. ein API-Key) — unangetastet lassen
+                zeilen.append(zeile)
+
+    for schluessel, wert in neue_werte.items():
+        if schluessel not in gesehen:
+            zeilen.append(f"{schluessel}={wert}")
+
+    env_path.write_text("\n".join(zeilen) + "\n", encoding="utf-8")
 
 
 # ── API: Runs ─────────────────────────────────────────────────────────────────
@@ -188,6 +230,9 @@ async def api_settings_save(request: Request):
     updates: dict = {}
     for field in _SETTINGS_FIELDS:
         if field not in data:
+            continue
+        if field in _READONLY_FIELDS:
+            # Sichtbar, aber nicht ueber die UI aenderbar — siehe _READONLY_FIELDS
             continue
         val = data[field]
         if field == "email_enabled":

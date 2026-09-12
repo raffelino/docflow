@@ -127,7 +127,10 @@ class TestE2ESettingsPage:
         # Verify the settings API now shows updated values
         data = client.get("/api/settings").json()
         assert data["photos_album"] == "Geändert"
-        assert data["photos_source"] == "all"
+        # photos_source ist schreibgeschuetzt: ein versehentliches "all" wuerde
+        # ~15.900 Aufnahmen durch OCR und LLM schicken. Sichtbar, aber nur in
+        # der .env aenderbar — siehe _READONLY_FIELDS.
+        assert data["photos_source"] == "album"
         assert data["schedule_hour"] == "5"
         assert data["schedule_minute"] == "45"
         assert data["email_imap_host"] == "imap.example.com"
@@ -235,9 +238,11 @@ class TestE2ESettingsPage:
         env_file = e2e_dir / ".env"
         assert env_file.exists()
         content = env_file.read_text()
-        assert "PHOTOS_SOURCE=all" in content
+        # Schreibgeschuetzt, behalten also ihren Ausgangswert
+        assert "PHOTOS_SOURCE=album" in content
+        assert "LLM_PROVIDER=anthropic" in content
+        # frei aenderbare Felder werden uebernommen
         assert "PHOTOS_ALBUM=MeinAlbum" in content
-        assert "LLM_PROVIDER=ollama" in content
         assert "SCHEDULE_HOUR=4" in content
         assert "EMAIL_ENABLED=false" in content
 

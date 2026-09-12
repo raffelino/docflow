@@ -83,15 +83,31 @@ die API-Keys beim Settings-Speichern weg).
 `c3857c7` (React-SPA, VitePress-Docs, iCloud-Export, Dedup-Grundlage) sind im Klon
 enthalten. Die HEIC-Fehlklassifikation aus `b57eeaf` ist damit wieder offen.
 
-## Reihenfolge für den Wiederaufbau
+## Reihenfolge für den Wiederaufbau — **abgeschlossen 2026-09-12**
 
-1. ~~`pre_classifier.py`~~ — **erledigt 2026-09-12** (`fd85c22`), an echten Daten
-   kalibriert: 100 % Recall auf 871 Dokumenten bei 2,5 % Falsch-Positiven.
-   Ebenfalls erledigt: `pillow-heif` als Dependency (`8ce5a49`).
-   Offen bleibt `FORCE_DOCUMENT_ALBUMS` beim Vollscan — dort ist die
-   Albumzugehörigkeit pro Foto erst mit Schritt 2 bekannt.
-2. Lazy-Iteratoren in `photos.py` inkl. `date_added`
-3. Inkrementeller Scan in `pipeline.py` + `scan_state`-Zugriffe in `db.py`
-4. Dann `recovery/2026-09-04-incremental-scan-cutoff.md` anwenden
-5. `keychain.py` (nur relevant, wenn `EMAIL_ENABLED=true`)
-6. Web-Teile: Settings/Sorting/Thumbnails, `_write_env_file`-Merge
+1. ~~`pre_classifier.py`~~ `fd85c22` — an echten Daten kalibriert, 100 % Recall auf
+   871 Dokumenten bei 2,5 % Falsch-Positiven. Dazu `pillow-heif` als Dependency
+   (`8ce5a49`), die Ursache der HEIC-Fehlklassifikation.
+2. ~~Lazy-Iteratoren in `photos.py`~~ `61c8db2` — inkl. `date_added`, `count_*` ohne
+   Dateizugriff, iCloud-Download über osxphotos statt AppleScript, `uuids_in_albums`
+   für `FORCE_DOCUMENT_ALBUMS` beim Vollscan.
+3. ~~Inkrementeller Scan~~ `61c8db2` + `a39d592` — `scan_state` mit den Spaltennamen
+   der Produktions-DB, Cutoff als Startzeitpunkt des Laufs, `total_scanned` als
+   Bereichsgröße.
+4. ~~Cutoff in den Iteratoren~~ — direkt richtig gebaut, die Notiz aus
+   `2026-09-04-incremental-scan-cutoff.md` ist damit eingelöst.
+5. ~~`keychain.py`~~ `1ab0d24` — Email-Passwort aus dem Schlüsselbund, Rückfall auf
+   `EMAIL_PASSWORD`.
+6. ~~Web-Teile~~ `15f9b4e` + `fbfc3b8` — `_write_env_file` mergt jetzt (ein Klick auf
+   "Speichern" löschte vorher den API-Key), Sortierung mit fester Spaltenzuordnung,
+   Vorschaubilder über `pypdf` mit Datei-Cache.
+
+### Was nicht zurückkommt
+
+Der Code der beiden Juni-Commits selbst ist verloren. Der Nachbau ist an den
+Produktionsdaten ausgerichtet (DB-Schema, Scan-State, der alte Thumbnail-Cache mit
+seiner 480-px-Kante) und an manchen Stellen besser als das Original — kein
+AppleScript-Export mehr, kalibrierte statt geratener Schwelle, `.env`-Merge.
+
+Offen geblieben: der alte Thumbnail-Cache im Ausgabeordner (193 ID-benannte Dateien,
+4,9 MB) wird nicht mehr gelesen und kann gelöscht werden.

@@ -3,6 +3,72 @@
 > This file is for AI coding agents (Claude Code, Codex, etc.). It describes the architecture,
 > dev commands, extension points, testing strategy, and known limitations.
 
+## Production Environment
+
+- **URL**: `http://192.168.178.103:8765`
+- **DB**: `/Users/rat/Documents/DocFlow/docflow.db`
+- **Log**: `/tmp/docflow.log` (Server) + `~/.docflow/docflow.log` (structlog)
+- **Server start**: `cd ~/git/docflow && nohup .venv/bin/python -m docflow > /tmp/docflow.log 2>&1 &`
+- **Repo**: `~/git/docflow` — **nicht** unter `~/.openclaw/workspace/`, dort wurde das
+  Verzeichnis am 2026-09-08 von einem naechtlichen Job geloescht (siehe `recovery/`)
+- **LLM**: OpenRouter (`anthropic/claude-3-haiku`)
+
+## Critical Config Rules
+
+- **Nach jedem Commit pushen.** Vier Commits gingen verloren, weil sie nur lokal lagen
+  und das Verzeichnis samt `.git` verschwand. `git log origin/main..HEAD` pruefen —
+  ein konfigurierter Upstream heisst nicht, dass er aktuell ist.
+- `LLM_PROVIDER=openrouter` — nicht auf `anthropic` aendern, kein Key vorhanden
+- `PHOTOS_ALBUM=Dokumente` — nicht auf `TestAlbum` aendern
+- `PHOTOS_SOURCE` — `album` und `all` sind beide unterstuetzt. Bei `all` filtert der
+  Pre-Classifier, `FORCE_DOCUMENT_ALBUMS` umgeht ihn. Pro Lauf auch ueber
+  `album_override="__all__"`.
+- `photos_source`, `llm_provider` und `web_host` stehen in `_READONLY_FIELDS`
+  (`web/routes.py`): sichtbar, aber nicht ueber die UI aenderbar.
+- `_write_env_file` **mergt** zeilenweise. Niemals auf Ueberschreiben umstellen —
+  sonst loescht ein Klick auf "Speichern" den `OPENROUTER_API_KEY`.
+- `OPENROUTER_API_KEY` muss immer in `.env` stehen (gitignored).
+
+## Known Pitfalls (learned the hard way)
+
+- **E2E-Tests ueberschreiben `.env`**: `_write_env_file` wird mit Test-Settings
+  aufgerufen. Vor `pytest -m e2e` die `.env` sichern und danach pruefen:
+  `grep -q "TestAlbum" .env && echo "WARNUNG: .env kontaminiert!"`
+  In dieser Sitzung hat ein Testlauf den API-Key geloescht.
+- **pillow-heif ist Pflicht** und steht in `pyproject.toml`. Fehlt es, scheitert jedes
+  `Image.open` auf HEIC mit `UnidentifiedImageError` — das sieht im Log wie ein
+  unlesbares Foto aus, nicht wie eine fehlende Abhaengigkeit, und sortiert
+  HEIC-Dokumente als Fotos aus. Registriert wird ueber `imaging.ensure_heif_support()`.
+- **AppleScript-Export** haengt bei iCloud-Fotos im Timeout. Stattdessen
+  `osxphotos photo.export(use_photos_export=True, timeout=...)`. Lokale HEIC-Dateien
+  werden gar nicht mehr exportiert, Pillow liest sie direkt.
+- **Videos** vor jedem Exportversuch aussortieren (`pre_classifier.is_video`), sonst
+  startet Photos.app eine Medienkonvertierung, die bei iCloud-only-Videos haengt.
+- **Aussortierte Aufnahmen muessen in die DB** (als `Foto`/`Video`, ohne OCR-Text).
+  Ohne den Eintrag greift der UUID-Dedup nicht und alle ~15.900 Fotos laufen jede
+  Nacht neu durch die Texterkennung.
+- **Scan-State-Key** ist der effektive Albumname, beim Vollscan `__all__`. Ein Wechsel
+  von `PHOTOS_SOURCE` wechselt den Key — jeder Modus hat seinen eigenen Cutoff.
+  Der Cutoff wird als **Startzeitpunkt** des Laufs gespeichert, nicht als Endzeit,
+  sonst entsteht eine Luecke fuer alles, was waehrend des Laufs hinzukommt.
+  Fortgeschrieben wird nur nach erfolgreichem Lauf ohne Datumsfilter.
+- **`date_added` ist tz-aware**, der Scan-State naiv. Direkt vergleichen wirft
+  `TypeError` — `photos._added_before_cutoff` normalisiert beide Seiten.
+- **`brctl download`** funktioniert fuer die Photos-Library nicht.
+- **FTS-Virtual-Table**: `DELETE FROM documents` scheitert an den Triggern.
+- **iCloud-Fotos**: `ismissing=True`, wenn keine lokale Kopie da ist. Zugriff in
+  Systemeinstellungen -> Datenschutz -> Fotos erteilen.
+
+## Pre-Classifier (Kostenbremse)
+
+`pre_classifier.py` entscheidet vor dem LLM, ob eine Aufnahme ein Dokument ist.
+Schwelle: 250 Zeichen OCR-Text. An echten Daten kalibriert (200 Fotos der Library
+gegen 871 klassifizierte Dokumente): 100 % Recall bei 2,5 % Falsch-Positiven.
+
+**Nicht** auf Screenshots filtern. Das Muster trifft 54,6 % der `Sonstiges`-Eintraege,
+aber auch 36,7 % der echten Dokumente — Online-Rechnungen und Tickets liegen als
+Screenshot vor. Ein Regressionstest haelt das fest.
+
 ## Architecture Overview
 
 ```

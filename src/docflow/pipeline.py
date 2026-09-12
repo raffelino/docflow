@@ -24,6 +24,7 @@ from PIL import Image
 from docflow.config import Settings
 from docflow.db import Database
 from docflow.imaging import ensure_heif_support
+from docflow.keychain import resolve_email_password
 from docflow.llm import DocumentClassification, get_llm_provider
 from docflow.llm.base import LLMProvider
 from docflow.ocr import extract_text
@@ -457,7 +458,7 @@ class Pipeline:
             host=self.settings.email_imap_host,
             port=self.settings.email_imap_port,
             username=self.settings.email_username,
-            password=self.settings.email_password,
+            password=resolve_email_password(self.settings),
             folder=self.settings.email_folder,
             processed_folder=self.settings.email_processed_folder,
             subject_filter=self.settings.email_filter_subject,

@@ -455,3 +455,28 @@ class TestInkrementellerScan:
         run = db.get_run(run_id)
         assert run["docs_processed"] == 0
         assert run["photos_skipped"] == 2
+
+    @pytest.mark.asyncio
+    async def test_total_scanned_ist_bereichsgroesse(
+        self, settings: Settings, db: Database, fake_image: Path, mock_llm
+    ):
+        """total_scanned zaehlt den Bereich, nicht die inkrementell geprueften.
+
+        Sonst stuerzt der Wert nach dem ersten inkrementellen Lauf auf 0 ab und
+        die Statistik im Scan-Stand ist wertlos.
+        """
+        db.update_scan_state(settings.photos_album, datetime(2026, 6, 10), 2)
+        photos = [
+            PhotoInfo(uuid="ts-alt", filename="alt.jpg", path=fake_image,
+                      original_filename="alt.jpg", date_added=datetime(2026, 6, 1)),
+            PhotoInfo(uuid="ts-neu", filename="neu.jpg", path=fake_image,
+                      original_filename="neu.jpg", date_added=datetime(2026, 6, 20)),
+        ]
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value=DOKUMENT_TEXT)):
+            with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary(photos)):
+                run_id = await self._pipeline(settings, db, mock_llm).run()
+
+        # nur die neue Aufnahme wurde geprueft ...
+        assert db.get_run(run_id)["photos_found"] == 1
+        # ... aber der Bereich umfasst beide
+        assert db.get_scan_state(settings.photos_album)["total_scanned"] == 2

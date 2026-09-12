@@ -195,6 +195,7 @@ class Pipeline:
             if a.strip()
         }
         photo_iter: Iterator[PhotoInfo] = iter(())
+        bereich_gesamt = 0
         force_uuids: set[str] = set()
         force_document_all = False
         try:
@@ -213,6 +214,20 @@ class Pipeline:
                 )
                 log(f"{photos_found} Aufnahmen zu pruefen (Album '{effective_album}')")
             self.db.update_run_progress(run_id, photos_found=photos_found)
+
+            # Groesse des Bereichs unabhaengig vom Cutoff — wird als total_scanned
+            # im Scan-Stand gefuehrt (Statistik "so viele waren es beim letzten
+            # Lauf"). Zaehlen ist billig, es fasst keine Datei an.
+            if scan_cutoff is not None:
+                bereich_gesamt = (
+                    library.count_all_photos(date_from=date_from, date_to=date_to)
+                    if scan_all
+                    else library.count_photos_in_album(
+                        effective_album, date_from=date_from, date_to=date_to
+                    )
+                )
+            else:
+                bereich_gesamt = photos_found
 
             # FORCE_DOCUMENT_ALBUMS: selbst gepflegte Ablagen umgehen die Vorpruefung
             if force_albums:
@@ -291,7 +306,7 @@ class Pipeline:
         # gelten Aufnahmen als gesehen, die nie geprueft wurden.
         if status == "success" and not (date_from or date_to):
             try:
-                self.db.update_scan_state(album_key, run_started, photos_found)
+                self.db.update_scan_state(album_key, run_started, bereich_gesamt)
             except Exception as e:
                 logger.warning("Scan-Stand nicht gespeichert", album=album_key, error=str(e))
 

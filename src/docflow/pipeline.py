@@ -27,6 +27,7 @@ from docflow.llm import DocumentClassification, get_llm_provider
 from docflow.llm.base import LLMProvider
 from docflow.ocr import extract_text
 from docflow.photos import PhotoInfo, get_library
+from docflow.pre_classifier import classify_media
 from docflow.storage import StorageBackend, get_storage_backend
 
 # HEIC muss registriert sein, bevor Pillow das erste Foto oeffnet.
@@ -163,9 +164,28 @@ class Pipeline:
             errors += 1
             photos = []
 
+        # FORCE_DOCUMENT_ALBUMS: selbst gepflegte Dokumentenablagen umgehen die
+        # Vorpruefung. Beim Vollscan (photos_source=all) ist die Albumzugehoerigkeit
+        # pro Foto hier noch nicht bekannt — das kommt mit den Lazy-Iteratoren
+        # (siehe recovery/GAP.md, Schritt 2).
+        force_albums = {
+            a.strip().casefold()
+            for a in (self.settings.force_document_albums or "").split(",")
+            if a.strip()
+        }
+        force_document = (
+            self.settings.photos_source != "all"
+            and self.settings.photos_album.strip().casefold() in force_albums
+        )
+        if force_document:
+            log(f"Album '{self.settings.photos_album}' gilt als Dokumentenablage "
+                f"(Vorpruefung uebersprungen)")
+
         for photo in photos:
             try:
-                processed = await self._process_photo(photo, run_id, log)
+                processed = await self._process_photo(
+                    photo, run_id, log, force_document=force_document
+                )
                 if processed:
                     docs_processed += 1
             except Exception as e:
@@ -192,11 +212,47 @@ class Pipeline:
 
         return run_id
 
+    def _record_skipped(
+        self,
+        photo: PhotoInfo,
+        run_id: int,
+        file_hash: str | None,
+        media_class: str,
+    ) -> None:
+        """Uebersprungene Aufnahme vermerken, damit kein Lauf sie erneut OCRt.
+
+        Ohne diesen Eintrag greift der UUID-Dedup beim naechsten Lauf nicht und
+        jedes der ~15.900 Fotos wuerde jede Nacht neu durch die Texterkennung
+        laufen. Der OCR-Text wird bewusst **nicht** gespeichert: er ist fuer
+        aussortierte Aufnahmen wertlos und wuerde die FTS-Tabelle mit
+        Zehntausenden Schnipseln fluten.
+        """
+        name = photo.original_filename or photo.filename
+        try:
+            self.db.insert_document(
+                run_id=run_id,
+                original_photo_id=photo.uuid,
+                original_filename=name,
+                ocr_text="",
+                llm_provider=None,
+                doc_type="Video" if media_class == "video" else "Foto",
+                tags=[],
+                suggested_filename=name,
+                saved_path=None,
+                file_hash=file_hash,
+            )
+        except Exception as e:  # pragma: no cover - defensiv, darf den Lauf nicht stoppen
+            logger.warning(
+                "Uebersprungene Aufnahme konnte nicht vermerkt werden",
+                filename=name, error=str(e),
+            )
+
     async def _process_photo(
         self,
         photo: PhotoInfo,
         run_id: int,
         log,
+        force_document: bool = False,
     ) -> bool:
         """Process a single photo. Returns True if processed, False if skipped."""
         log(f"Processing photo: {photo.filename}")
@@ -204,6 +260,14 @@ class Pipeline:
         # Duplicate check by UUID
         if self.db.document_exists(photo_id=photo.uuid):
             log(f"  SKIP: Already processed (UUID {photo.uuid})")
+            return False
+
+        # Videos gar nicht erst anfassen: es gibt keinen OCR-Pfad, und ein
+        # Exportversuch loest in Photos.app eine Medienkonvertierung aus, die bei
+        # iCloud-only-Videos haengen bleibt.
+        if classify_media(photo.filename, None) == "video":
+            self._record_skipped(photo, run_id, None, "video")
+            log(f"  Skipping video: {photo.filename}")
             return False
 
         # Check local file
@@ -220,6 +284,19 @@ class Pipeline:
         ocr_text = await extract_text(photo.path)
 
         log(f"  OCR: {len(ocr_text)} chars extracted")
+
+        # Vorentscheidung: lohnt diese Aufnahme einen LLM-Aufruf?
+        media_class = classify_media(
+            photo.filename,
+            ocr_text,
+            min_chars=self.settings.pre_classifier_min_chars,
+            force_document=force_document,
+        )
+        log(f"  Pre-classified as: {media_class}")
+        if media_class != "document":
+            self._record_skipped(photo, run_id, file_hash, media_class)
+            log(f"  Skipping {media_class}: {photo.filename}")
+            return False
 
         # LLM classification
         classification = await self.llm.classify_document(ocr_text or "[No text extracted]")

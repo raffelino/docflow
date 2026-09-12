@@ -12,6 +12,16 @@ from docflow.photos import MockPhotosLibrary, PhotoInfo
 from docflow.pipeline import Pipeline
 from docflow.storage.local import LocalStorage
 
+# Oberhalb der Pre-Classifier-Schwelle (250 Zeichen). Kurztexte werden als Foto
+# aussortiert — das ist gewolltes Verhalten und in tests/test_pipeline.py geprueft.
+DOKUMENT_TEXT = (
+    "Vodafone GmbH\nRechnung Nr. 2026-4711\nDatum: 12.09.2026\n"
+    "Kundennummer: 998877\nMobilfunk September 2026\n"
+    "Grundgebuehr 29,99 EUR\nVerbrauch 15,01 EUR\n"
+    "Netto 37,82 EUR\nMwSt 19 Prozent 7,18 EUR\nGesamtbetrag 45,00 EUR\n"
+    "Zahlbar bis 26.09.2026 per Lastschrift.\n"
+)
+
 
 @pytest.mark.e2e
 class TestE2EPhotoPipeline:
@@ -41,7 +51,7 @@ class TestE2EPhotoPipeline:
 
         with patch(
             "docflow.pipeline.extract_text",
-            new=AsyncMock(return_value="Vodafone GmbH Rechnung 45,00 EUR"),
+            new=AsyncMock(return_value=DOKUMENT_TEXT),
         ):
             with patch(
                 "docflow.pipeline.get_library",
@@ -92,7 +102,9 @@ class TestE2EPhotoPipeline:
         photos = []
         for i in range(3):
             p = e2e_dir / f"photo_{i}.jpg"
-            Image.new("RGB", (80, 80), color=(200, 200, 200)).save(p, format="JPEG")
+            # Unterschiedliche Farbe je Bild: identische Dateien haetten denselben
+            # SHA256 und wuerden vom file_hash-Dedup als Duplikat verworfen.
+            Image.new("RGB", (80, 80), color=(200, 40 * i, 100 + 30 * i)).save(p, format="JPEG")
             photos.append(
                 PhotoInfo(
                     uuid=f"uuid-{i}",
@@ -110,7 +122,7 @@ class TestE2EPhotoPipeline:
             storage=storage,
         )
 
-        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value="some text")):
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value=DOKUMENT_TEXT)):
             with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary(photos)):
                 run_id = await pipeline.run()
 
@@ -140,5 +152,9 @@ class TestE2EPhotoPipeline:
             run_id = await pipeline.run()
 
         run = e2e_db.get_run(run_id)
-        # Should still succeed — just with empty OCR text
-        assert run["docs_processed"] == 1
+        # Ohne lokale Datei kann kein PDF entstehen: uebersprungen, aber kein Fehler.
+        # (Die Assertion forderte hier fruehr docs_processed == 1 und war rot —
+        # sie widersprach dem eigenen Docstring und dem Code.)
+        assert run["status"] == "success"
+        assert run["errors"] == 0
+        assert run["docs_processed"] == 0

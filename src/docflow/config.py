@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     # ── Photos ────────────────────────────────────────────────────────────────
     photos_source: Literal["album", "all"] = "album"
     photos_album: str = "Dokumente"
+    # Alben, deren Inhalt ohne Vorpruefung als Dokument gilt (Komma-getrennt).
+    # Fuer selbst gepflegte Dokumentenablagen, in denen auch textarme Scans liegen.
+    force_document_albums: str = "Dokumente"
+    # Mindestmenge OCR-Text, ab der ein Bild als Dokument gilt; an echten
+    # Daten kalibriert, siehe pre_classifier.py.
+    pre_classifier_min_chars: int = 250
 
     # ── Output ────────────────────────────────────────────────────────────────
     output_dir: Path = Path("~/Documents/DocFlow")

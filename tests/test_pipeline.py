@@ -14,6 +14,17 @@ from docflow.photos import MockPhotosLibrary, PhotoInfo
 from docflow.pipeline import Pipeline, _destination_path, _safe_filename
 from tests.conftest import FAKE_CLASSIFICATION
 
+# Oberhalb der Pre-Classifier-Schwelle (250 Zeichen): diese Tests pruefen den
+# Verarbeitungspfad, nicht die Vorentscheidung. Ein Kurztext wuerde als Foto
+# aussortiert — dafuer gibt es test_photo_wird_aussortiert.
+DOKUMENT_TEXT = (
+    "Vodafone GmbH\nRechnung Nr. 2026-4711\nDatum: 12.09.2026\n"
+    "Kundennummer: 998877\nMobilfunk September 2026\n"
+    "Grundgebuehr 29,99 EUR\nVerbrauch 15,01 EUR\n"
+    "Netto 37,82 EUR\nMwSt 19 Prozent 7,18 EUR\nGesamtbetrag 45,00 EUR\n"
+    "Zahlbar bis 26.09.2026 per Lastschrift.\n"
+)
+
 
 @pytest.mark.unit
 class TestHelpers:
@@ -79,7 +90,7 @@ class TestPipeline:
         storage = LocalStorage(base_dir=settings.output_dir)
 
         with patch(
-            "docflow.pipeline.extract_text", new=AsyncMock(return_value="Rechnung Vodafone 45 EUR")
+            "docflow.pipeline.extract_text", new=AsyncMock(return_value=DOKUMENT_TEXT)
         ):
             pipeline = Pipeline(settings=settings, db=db, llm=mock_llm, storage=storage)
             with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([photo])):
@@ -118,7 +129,7 @@ class TestPipeline:
 
         storage = LocalStorage(base_dir=settings.output_dir)
 
-        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value="text")):
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value=DOKUMENT_TEXT)):
             pipeline = Pipeline(settings=settings, db=db, llm=failing_llm, storage=storage)
             with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([photo])):
                 run_id = await pipeline.run()
@@ -149,7 +160,7 @@ class TestPipeline:
         storage = LocalStorage(base_dir=settings.output_dir)
         mock_lib = MockPhotosLibrary([photo])
 
-        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value="Some text")):
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value=DOKUMENT_TEXT)):
             pipeline = Pipeline(settings=settings, db=db, llm=mock_llm, storage=storage)
             with patch("docflow.pipeline.get_library", return_value=mock_lib):
                 run_id = await pipeline.run()
@@ -197,7 +208,7 @@ class TestPipeline:
 
         storage = LocalStorage(base_dir=settings.output_dir)
 
-        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value="text")):
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value=DOKUMENT_TEXT)):
             pipeline = Pipeline(settings=settings, db=db, llm=mock_llm, storage=storage)
             with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([photo])):
                 await pipeline.run()
@@ -208,3 +219,115 @@ class TestPipeline:
         assert saved_path.exists()
         assert saved_path.suffix == ".pdf"
         assert saved_path.stat().st_size > 0
+
+
+@pytest.mark.unit
+class TestPreClassifierIntegration:
+    """Die Vorentscheidung im Pipelinelauf: was gar nicht zum LLM gehen darf."""
+
+    @staticmethod
+    def _storage(settings: Settings):
+        from docflow.storage.local import LocalStorage
+
+        return LocalStorage(base_dir=settings.output_dir)
+
+    @pytest.mark.asyncio
+    async def test_textarmes_foto_wird_aussortiert(
+        self, settings: Settings, db: Database, fake_image: Path, mock_llm
+    ):
+        """Ein Foto ohne verwertbaren Text kostet keinen LLM-Aufruf."""
+        settings.force_document_albums = ""  # Vorpruefung aktiv lassen
+        photo = PhotoInfo(
+            uuid="foto-001", filename="IMG_0001.jpg", path=fake_image,
+            original_filename="IMG_0001.jpg",
+        )
+
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value="Ausgang")):
+            pipeline = Pipeline(
+                settings=settings, db=db, llm=mock_llm, storage=self._storage(settings)
+            )
+            with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([photo])):
+                run_id = await pipeline.run()
+
+        run = db.get_run(run_id)
+        assert run["docs_processed"] == 0
+        assert run["errors"] == 0
+        mock_llm.classify_document.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_aussortiertes_foto_wird_vermerkt(
+        self, settings: Settings, db: Database, fake_image: Path, mock_llm
+    ):
+        """Der Vermerk ist noetig, damit der naechste Lauf nicht erneut OCRt."""
+        settings.force_document_albums = ""
+        photo = PhotoInfo(
+            uuid="foto-002", filename="IMG_0002.jpg", path=fake_image,
+            original_filename="IMG_0002.jpg",
+        )
+
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value="")):
+            pipeline = Pipeline(
+                settings=settings, db=db, llm=mock_llm, storage=self._storage(settings)
+            )
+            with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([photo])):
+                await pipeline.run()
+
+        docs = db.list_documents()
+        assert len(docs) == 1
+        assert docs[0]["doc_type"] == "Foto"
+        assert docs[0]["original_photo_id"] == "foto-002"
+        assert docs[0]["saved_path"] is None
+        # OCR-Text bewusst nicht persistiert
+        assert not docs[0]["ocr_text"]
+        # und beim naechsten Lauf greift der UUID-Dedup
+        assert db.document_exists(photo_id="foto-002")
+
+    @pytest.mark.asyncio
+    async def test_video_wird_nie_exportiert(
+        self, settings: Settings, db: Database, mock_llm
+    ):
+        """Videos werden vor jedem Dateizugriff aussortiert (path=None genuegt)."""
+        settings.force_document_albums = ""
+        photo = PhotoInfo(
+            uuid="video-001", filename="IMG_0003.MOV", path=None,
+            original_filename="IMG_0003.MOV",
+        )
+
+        ocr = AsyncMock(return_value=DOKUMENT_TEXT)
+        with patch("docflow.pipeline.extract_text", new=ocr):
+            pipeline = Pipeline(
+                settings=settings, db=db, llm=mock_llm, storage=self._storage(settings)
+            )
+            with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([photo])):
+                run_id = await pipeline.run()
+
+        run = db.get_run(run_id)
+        assert run["docs_processed"] == 0
+        assert run["errors"] == 0
+        ocr.assert_not_called()
+        mock_llm.classify_document.assert_not_called()
+        docs = db.list_documents()
+        assert len(docs) == 1 and docs[0]["doc_type"] == "Video"
+
+    @pytest.mark.asyncio
+    async def test_force_document_album_umgeht_vorpruefung(
+        self, settings: Settings, db: Database, fake_image: Path, mock_llm
+    ):
+        """In der eigenen Dokumentenablage wird auch textarmes Material klassifiziert."""
+        settings.photos_source = "album"
+        settings.photos_album = "Dokumente"
+        settings.force_document_albums = "Dokumente"
+        photo = PhotoInfo(
+            uuid="scan-001", filename="scan.jpg", path=fake_image,
+            original_filename="scan.jpg",
+        )
+
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value="kurz")):
+            pipeline = Pipeline(
+                settings=settings, db=db, llm=mock_llm, storage=self._storage(settings)
+            )
+            with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([photo])):
+                run_id = await pipeline.run()
+
+        assert db.get_run(run_id)["docs_processed"] == 1
+        mock_llm.classify_document.assert_called_once()

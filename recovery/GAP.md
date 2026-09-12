@@ -85,7 +85,11 @@ enthalten. Die HEIC-Fehlklassifikation aus `b57eeaf` ist damit wieder offen.
 
 ## Reihenfolge für den Wiederaufbau
 
-1. `pre_classifier.py` — ohne ihn ist kein Lauf über die ganze Library vertretbar
+1. ~~`pre_classifier.py`~~ — **erledigt 2026-09-12** (`fd85c22`), an echten Daten
+   kalibriert: 100 % Recall auf 871 Dokumenten bei 2,5 % Falsch-Positiven.
+   Ebenfalls erledigt: `pillow-heif` als Dependency (`8ce5a49`).
+   Offen bleibt `FORCE_DOCUMENT_ALBUMS` beim Vollscan — dort ist die
+   Albumzugehörigkeit pro Foto erst mit Schritt 2 bekannt.
 2. Lazy-Iteratoren in `photos.py` inkl. `date_added`
 3. Inkrementeller Scan in `pipeline.py` + `scan_state`-Zugriffe in `db.py`
 4. Dann `recovery/2026-09-04-incremental-scan-cutoff.md` anwenden

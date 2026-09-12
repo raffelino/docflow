@@ -27,6 +27,9 @@ def _client_and_settings(e2e_dir: Path) -> tuple[TestClient, Settings]:
         web_port=8765,
     )
     app = create_app(settings)
+    # Nicht in die Projekt-.env schreiben: dieser Test speichert Einstellungen,
+    # und genau das hat dort schon einmal den OPENROUTER_API_KEY ueberschrieben.
+    app.state.env_path = e2e_dir / ".env"
     return TestClient(app), settings
 
 

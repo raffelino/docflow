@@ -175,3 +175,47 @@ class TestSortierung:
         assert ab == sorted(ab, reverse=True)
         # unsinnige Richtung -> absteigend
         assert [d["id"] for d in db.list_documents(order="seitwaerts")] == ab
+
+
+@pytest.mark.unit
+class TestFixtureIsolation:
+    def test_settings_fixture_ignoriert_die_echte_env(self, settings):
+        """Regression: die Tests haengen nicht an der Projekt-.env.
+
+        Vor dieser Absicherung kippten drei Scan-State-Tests, als in der .env
+        PHOTOS_SOURCE auf "all" gestellt wurde — sie bekamen den
+        Vollscan-Schluessel statt den Albumnamen.
+        """
+        assert settings.photos_source == "album"
+        assert settings.photos_album == "TestAlbum"
+        # und der echte Ausgabeordner wird nie angefasst
+        assert "Documents/DocFlow" not in str(settings.output_dir)
+
+
+@pytest.mark.unit
+class TestEnvPathUmlenkbar:
+    def test_app_setzt_standardpfad(self, settings):
+        """Der Settings-Endpoint schreibt nach app.state.env_path.
+
+        Vorher stand dort fest Path.cwd()/".env" — dadurch haben E2E-Testlaeufe
+        die Projekt-.env ueberschrieben und einmal den API-Key geloescht.
+        """
+        from docflow.web.app import create_app
+
+        app = create_app(settings)
+        assert str(app.state.env_path).endswith(".env")
+
+    def test_umgelenkter_pfad_wird_benutzt(self, settings, tmp_path):
+        from fastapi.testclient import TestClient
+
+        from docflow.web.app import create_app
+
+        ziel = tmp_path / "umgelenkt.env"
+        app = create_app(settings)
+        app.state.env_path = ziel
+        client = TestClient(app)
+
+        client.post("/api/settings", json={"photos_album": "Woanders"})
+
+        assert ziel.exists()
+        assert "PHOTOS_ALBUM=Woanders" in ziel.read_text(encoding="utf-8")

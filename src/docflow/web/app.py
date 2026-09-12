@@ -24,6 +24,8 @@ def create_app(settings: Settings) -> FastAPI:
 
     app.state.settings = settings
     app.state.db = db
+    # Ziel fuer Settings-Speicherungen; Tests ueberschreiben das.
+    app.state.env_path = Path.cwd() / ".env"
 
     # VitePress documentation site at /docs/
     has_docs = DOCS_DIR.is_dir() and (DOCS_DIR / "index.html").exists()

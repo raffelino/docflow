@@ -287,8 +287,10 @@ async def api_settings_save(request: Request):
     new_settings = settings.model_copy(update=updates)
     request.app.state.settings = new_settings
 
-    env_path = Path.cwd() / ".env"
-    _write_env_file(new_settings, env_path)
+    # Zielpfad ueber app.state, damit Tests nicht in die Projekt-.env schreiben
+    # (dieser Endpoint hat dort schon einmal den API-Key ueberschrieben).
+    env_path = getattr(request.app.state, "env_path", None) or Path.cwd() / ".env"
+    _write_env_file(new_settings, Path(env_path))
 
     return {"status": "ok"}
 

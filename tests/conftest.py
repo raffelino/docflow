@@ -58,8 +58,15 @@ def db(tmp_dir: Path) -> Database:
 
 @pytest.fixture
 def settings(tmp_dir: Path) -> Settings:
+    # _env_file=None: die Tests duerfen NICHT von der echten .env abhaengen.
+    # Sonst kippen sie, sobald sich dort etwas aendert — bei der Umstellung auf
+    # PHOTOS_SOURCE=all sind so drei Scan-State-Tests gebrochen, weil sie
+    # ploetzlich den Vollscan-Schluessel bekamen statt den Albumnamen.
     return Settings(
+        _env_file=None,
+        photos_source="album",
         photos_album="TestAlbum",
+        force_document_albums="Dokumente",
         output_dir=tmp_dir / "output",
         db_path=tmp_dir / "docflow.db",
         llm_provider="anthropic",

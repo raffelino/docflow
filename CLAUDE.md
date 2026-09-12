@@ -31,10 +31,12 @@
 
 ## Known Pitfalls (learned the hard way)
 
-- **E2E-Tests ueberschreiben `.env`**: `_write_env_file` wird mit Test-Settings
-  aufgerufen. Vor `pytest -m e2e` die `.env` sichern und danach pruefen:
-  `grep -q "TestAlbum" .env && echo "WARNUNG: .env kontaminiert!"`
-  In dieser Sitzung hat ein Testlauf den API-Key geloescht.
+- **E2E-Tests und die `.env`** — *behoben am 2026-09-12, zweifach abgesichert:*
+  Der Settings-Endpoint schreibt nach `app.state.env_path` (Tests lenken das in ihr
+  tmp-Verzeichnis um), und die Test-Fixtures erzeugen `Settings(_env_file=None)`,
+  lesen die Projekt-`.env` also nicht mehr. Zusammen mit der Merge-Logik ist der
+  API-Key damit dreifach geschuetzt. Vorher hat ein Testlauf ihn geloescht.
+  Beides hat Regressionstests — nicht zurueckbauen.
 - **pillow-heif ist Pflicht** und steht in `pyproject.toml`. Fehlt es, scheitert jedes
   `Image.open` auf HEIC mit `UnidentifiedImageError` — das sieht im Log wie ein
   unlesbares Foto aus, nicht wie eine fehlende Abhaengigkeit, und sortiert

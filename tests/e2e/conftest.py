@@ -21,8 +21,15 @@ def e2e_dir() -> Generator[Path, None, None]:
 
 @pytest.fixture
 def e2e_settings(e2e_dir: Path) -> Settings:
+    # _env_file=None: die Tests duerfen NICHT von der echten .env abhaengen.
+    # Sonst kippen sie, sobald sich dort etwas aendert — bei der Umstellung auf
+    # PHOTOS_SOURCE=all sind so drei Scan-State-Tests gebrochen, weil sie
+    # ploetzlich den Vollscan-Schluessel bekamen statt den Albumnamen.
     return Settings(
+        _env_file=None,
+        photos_source="album",
         photos_album="E2EAlbum",
+        force_document_albums="Dokumente",
         output_dir=e2e_dir / "output",
         db_path=e2e_dir / "docflow.db",
         llm_provider="anthropic",

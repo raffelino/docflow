@@ -25,6 +25,14 @@ CREATE TABLE IF NOT EXISTS runs (
     log TEXT DEFAULT ''
 );
 
+-- Fortschritt des inkrementellen Scans, ein Eintrag je Scan-Bereich.
+-- Schluessel ist der effektive Albumname bzw. '__all__' beim Vollscan.
+CREATE TABLE IF NOT EXISTS scan_state (
+    album TEXT PRIMARY KEY,
+    last_scanned_at TEXT,
+    total_scanned INTEGER DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS documents (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     run_id INTEGER REFERENCES runs(id),
@@ -83,6 +91,7 @@ MIGRATIONS = [
     "ALTER TABLE documents ADD COLUMN storage_backend TEXT",
     "ALTER TABLE documents ADD COLUMN cloud_path TEXT",
     "ALTER TABLE documents ADD COLUMN file_hash TEXT",
+    "ALTER TABLE runs ADD COLUMN photos_skipped INTEGER DEFAULT 0",
 ]
 
 
@@ -142,14 +151,67 @@ class Database:
         docs_processed: int,
         errors: int,
         log: str,
+        photos_skipped: int = 0,
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """UPDATE runs
                    SET finished_at=?, status=?, photos_found=?,
-                       docs_processed=?, errors=?, log=?
+                       docs_processed=?, errors=?, log=?, photos_skipped=?
                    WHERE id=?""",
-                (datetime.utcnow(), status, photos_found, docs_processed, errors, log, run_id),
+                (datetime.utcnow(), status, photos_found, docs_processed, errors, log,
+                 photos_skipped, run_id),
+            )
+
+    def update_run_progress(
+        self,
+        run_id: int,
+        photos_found: int | None = None,
+        docs_processed: int | None = None,
+        photos_skipped: int | None = None,
+    ) -> None:
+        """Zwischenstand eines laufenden Durchlaufs fortschreiben.
+
+        Bei einem Vollscan ueber ~15.900 Aufnahmen dauert ein Lauf lange; ohne
+        diese Aktualisierung zeigt das Dashboard bis zum Ende nichts an.
+        """
+        felder = {
+            "photos_found": photos_found,
+            "docs_processed": docs_processed,
+            "photos_skipped": photos_skipped,
+        }
+        gesetzt = {k: v for k, v in felder.items() if v is not None}
+        if not gesetzt:
+            return
+        zuweisung = ", ".join(f"{k}=?" for k in gesetzt)
+        with self._connect() as conn:
+            conn.execute(
+                f"UPDATE runs SET {zuweisung} WHERE id=?",
+                (*gesetzt.values(), run_id),
+            )
+
+    # ── Inkrementeller Scan ──────────────────────────────────────────────────
+
+    def get_scan_state(self, album: str) -> dict | None:
+        """Letzten Scan-Stand fuer diesen Bereich lesen ('__all__' beim Vollscan)."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT album, last_scanned_at, total_scanned FROM scan_state WHERE album=?",
+                (album,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def update_scan_state(self, album: str, last_scanned_at: datetime, total_scanned: int) -> None:
+        """Scan-Stand setzen. Wird erst nach einem erfolgreichen Lauf aufgerufen —
+        sonst gelten nach einem Abbruch Aufnahmen als gesehen, die es nicht sind."""
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO scan_state (album, last_scanned_at, total_scanned)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(album) DO UPDATE SET
+                       last_scanned_at=excluded.last_scanned_at,
+                       total_scanned=excluded.total_scanned""",
+                (album, last_scanned_at.isoformat(), total_scanned),
             )
 
     def get_run(self, run_id: int) -> dict | None:

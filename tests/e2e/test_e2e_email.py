@@ -87,7 +87,13 @@ class TestE2EEmailPipeline:
         ):
             with patch(
                 "docflow.pipeline.get_library",
-                return_value=MagicMock(get_photos_in_album=MagicMock(return_value=[])),
+                return_value=MagicMock(
+                    count_photos_in_album=MagicMock(return_value=0),
+                    count_all_photos=MagicMock(return_value=0),
+                    uuids_in_albums=MagicMock(return_value=set()),
+                    iter_photos_in_album=MagicMock(return_value=iter(())),
+                    iter_all_photos=MagicMock(return_value=iter(())),
+                ),
             ):
                 with patch(
                     "docflow.email_source.IMAPEmailSource", return_value=mock_source_instance

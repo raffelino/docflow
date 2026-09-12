@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     # Mindestmenge OCR-Text, ab der ein Bild als Dokument gilt; an echten
     # Daten kalibriert, siehe pre_classifier.py.
     pre_classifier_min_chars: int = 250
+    # Zeitbudget je iCloud-Download. Grosszuegig, weil Photos.app bei
+    # nicht lokal vorliegenden Aufnahmen erst aus der Cloud laedt.
+    icloud_download_timeout: int = 300
+    icloud_batch_size: int = 1
+    # Nur erfassen, nicht klassifizieren (kein LLM-Aufruf, keine Kosten).
+    scan_only: bool = False
 
     # ── Output ────────────────────────────────────────────────────────────────
     output_dir: Path = Path("~/Documents/DocFlow")

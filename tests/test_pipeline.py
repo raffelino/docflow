@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -331,3 +332,126 @@ class TestPreClassifierIntegration:
 
         assert db.get_run(run_id)["docs_processed"] == 1
         mock_llm.classify_document.assert_called_once()
+
+
+@pytest.mark.unit
+class TestInkrementellerScan:
+    """Scan-Stand lesen, anwenden und fortschreiben."""
+
+    @staticmethod
+    def _storage(settings: Settings):
+        from docflow.storage.local import LocalStorage
+
+        return LocalStorage(base_dir=settings.output_dir)
+
+    def _pipeline(self, settings: Settings, db: Database, llm):
+        return Pipeline(settings=settings, db=db, llm=llm, storage=self._storage(settings))
+
+    @pytest.mark.asyncio
+    async def test_erstlauf_schreibt_scan_stand(
+        self, settings: Settings, db: Database, fake_image: Path, mock_llm
+    ):
+        photo = PhotoInfo(
+            uuid="inc-001", filename="a.jpg", path=fake_image, original_filename="a.jpg",
+            date_added=datetime(2026, 6, 1),
+        )
+        assert db.get_scan_state(settings.photos_album) is None
+
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value=DOKUMENT_TEXT)):
+            with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([photo])):
+                await self._pipeline(settings, db, mock_llm).run()
+
+        state = db.get_scan_state(settings.photos_album)
+        assert state is not None
+        assert state["last_scanned_at"]
+        assert state["total_scanned"] == 1
+
+    @pytest.mark.asyncio
+    async def test_zweiter_lauf_ueberspringt_alte_aufnahmen(
+        self, settings: Settings, db: Database, fake_image: Path, mock_llm
+    ):
+        """Nach einem Lauf darf dieselbe alte Aufnahme nicht erneut geprueft werden."""
+        db.update_scan_state(settings.photos_album, datetime(2026, 6, 10), 1)
+        alt = PhotoInfo(
+            uuid="inc-alt", filename="alt.jpg", path=fake_image, original_filename="alt.jpg",
+            date_added=datetime(2026, 6, 1),
+        )
+        ocr = AsyncMock(return_value=DOKUMENT_TEXT)
+        with patch("docflow.pipeline.extract_text", new=ocr):
+            with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([alt])):
+                run_id = await self._pipeline(settings, db, mock_llm).run()
+
+        run = db.get_run(run_id)
+        assert run["photos_found"] == 0
+        ocr.assert_not_called()
+        mock_llm.classify_document.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_neue_aufnahme_kommt_durch(
+        self, settings: Settings, db: Database, fake_image: Path, mock_llm
+    ):
+        db.update_scan_state(settings.photos_album, datetime(2026, 6, 10), 0)
+        neu = PhotoInfo(
+            uuid="inc-neu", filename="neu.jpg", path=fake_image, original_filename="neu.jpg",
+            date_added=datetime(2026, 6, 20),
+        )
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value=DOKUMENT_TEXT)):
+            with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([neu])):
+                run_id = await self._pipeline(settings, db, mock_llm).run()
+
+        assert db.get_run(run_id)["docs_processed"] == 1
+
+    @pytest.mark.asyncio
+    async def test_datumsfilter_ignoriert_scan_stand(
+        self, settings: Settings, db: Database, fake_image: Path, mock_llm
+    ):
+        """Ein manuelles Fenster soll auch schon gesehene Aufnahmen erfassen."""
+        db.update_scan_state(settings.photos_album, datetime(2026, 6, 10), 1)
+        alt = PhotoInfo(
+            uuid="inc-manuell", filename="alt.jpg", path=fake_image, original_filename="alt.jpg",
+            date_added=datetime(2026, 6, 1), date=datetime(2026, 5, 5),
+            photo_date=datetime(2026, 5, 5),
+        )
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value=DOKUMENT_TEXT)):
+            with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([alt])):
+                run_id = await self._pipeline(settings, db, mock_llm).run(
+                    date_from=date(2026, 5, 1), date_to=date(2026, 5, 31)
+                )
+
+        assert db.get_run(run_id)["docs_processed"] == 1
+        # und der Scan-Stand bleibt unangetastet
+        assert db.get_scan_state(settings.photos_album)["last_scanned_at"].startswith("2026-06-10")
+
+    @pytest.mark.asyncio
+    async def test_vollscan_nutzt_eigenen_schluessel(
+        self, settings: Settings, db: Database, fake_image: Path, mock_llm
+    ):
+        """album- und Vollscan fuehren getrennte Scan-Staende."""
+        photo = PhotoInfo(
+            uuid="inc-all", filename="a.jpg", path=fake_image, original_filename="a.jpg",
+            date_added=datetime(2026, 6, 1),
+        )
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value=DOKUMENT_TEXT)):
+            with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([photo])):
+                await self._pipeline(settings, db, mock_llm).run(album_override="__all__")
+
+        assert db.get_scan_state("__all__") is not None
+        assert db.get_scan_state(settings.photos_album) is None
+
+    @pytest.mark.asyncio
+    async def test_uebersprungene_werden_gezaehlt(
+        self, settings: Settings, db: Database, fake_image: Path, mock_llm
+    ):
+        settings.force_document_albums = ""
+        photos = [
+            PhotoInfo(uuid=f"skip-{i}", filename=f"f{i}.jpg", path=fake_image,
+                      original_filename=f"f{i}.jpg")
+            for i in range(2)
+        ]
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value="")):
+            with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary(photos)):
+                run_id = await self._pipeline(settings, db, mock_llm).run()
+
+        run = db.get_run(run_id)
+        assert run["docs_processed"] == 0
+        assert run["photos_skipped"] == 2

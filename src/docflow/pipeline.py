@@ -14,7 +14,8 @@ import hashlib
 import io
 import re
 import tempfile
-from datetime import datetime
+from collections.abc import Iterator
+from datetime import date, datetime
 from pathlib import Path
 
 import structlog
@@ -131,12 +132,26 @@ class Pipeline:
     async def run(
         self,
         mock_photos: list[PhotoInfo] | None = None,
+        album_override: str | None = None,
+        date_from: date | None = None,
+        date_to: date | None = None,
+        skip_cloud_only: bool = False,
     ) -> int:
-        """Run the full pipeline. Returns the run_id."""
+        """Run the full pipeline. Returns the run_id.
+
+        ``album_override`` waehlt fuer diesen Lauf ein anderes Album; der
+        Sonderwert ``"__all__"`` erzwingt einen Vollscan. Ein gesetzter
+        Datumsbereich schaltet den inkrementellen Scan ab — der Nutzer definiert
+        das Fenster dann selbst.
+        """
         run_id = self.db.create_run()
+        # Startzeitpunkt als kuenftiger Cutoff: Aufnahmen, die waehrend des Laufs
+        # hinzukommen, bleiben so fuer den naechsten Lauf sichtbar.
+        run_started = datetime.utcnow()
         log_lines: list[str] = []
         photos_found = 0
         docs_processed = 0
+        photos_skipped = 0
         errors = 0
 
         def log(msg: str) -> None:
@@ -145,61 +160,121 @@ class Pipeline:
 
         log("Pipeline started")
 
-        # ── 1. Photos ─────────────────────────────────────────────────────────
-        try:
-            library = get_library(
-                album=self.settings.photos_album,
-                mock_photos=mock_photos,
-            )
-            if self.settings.photos_source == "all":
-                photos = library.get_all_photos()
-                photos_found = len(photos)
-                log(f"Found {photos_found} photos in library")
-            else:
-                photos = library.get_photos_in_album(self.settings.photos_album)
-                photos_found = len(photos)
-                log(f"Found {photos_found} photos in album '{self.settings.photos_album}'")
-        except Exception as e:
-            log(f"ERROR fetching photos: {e}")
-            errors += 1
-            photos = []
+        # ── 1. Umfang bestimmen ───────────────────────────────────────────────
+        scan_all = self.settings.photos_source == "all" or album_override == "__all__"
+        if album_override and album_override != "__all__":
+            effective_album = album_override
+            log(f"Album-Override: '{album_override}' statt '{self.settings.photos_album}'")
+        else:
+            effective_album = self.settings.photos_album
+        album_key = "__all__" if scan_all else effective_album
 
-        # FORCE_DOCUMENT_ALBUMS: selbst gepflegte Dokumentenablagen umgehen die
-        # Vorpruefung. Beim Vollscan (photos_source=all) ist die Albumzugehoerigkeit
-        # pro Foto hier noch nicht bekannt — das kommt mit den Lazy-Iteratoren
-        # (siehe recovery/GAP.md, Schritt 2).
+        if scan_all:
+            log("Vollscan der gesamten Photos-Library (Vorpruefung aktiv)")
+
+        # ── 2. Inkrementellen Cutoff bestimmen ────────────────────────────────
+        scan_cutoff: datetime | None = None
+        if date_from or date_to:
+            log(f"Datumsfilter {date_from or '-'} bis {date_to or '-'} "
+                f"(Scan-Stand wird ignoriert)")
+        else:
+            state = self.db.get_scan_state(album_key)
+            if state and state.get("last_scanned_at"):
+                try:
+                    scan_cutoff = datetime.fromisoformat(state["last_scanned_at"])
+                    log(f"Inkrementell: nur Aufnahmen seit {scan_cutoff.isoformat()}")
+                except ValueError:
+                    log(f"Scan-Stand unlesbar ({state['last_scanned_at']!r}) — Erstlauf")
+            else:
+                log(f"Erstlauf fuer '{album_key}': alle Aufnahmen werden geprueft")
+
+        # ── 3. Aufnahmen durchgehen ───────────────────────────────────────────
         force_albums = {
-            a.strip().casefold()
+            a.strip()
             for a in (self.settings.force_document_albums or "").split(",")
             if a.strip()
         }
-        force_document = (
-            self.settings.photos_source != "all"
-            and self.settings.photos_album.strip().casefold() in force_albums
-        )
-        if force_document:
-            log(f"Album '{self.settings.photos_album}' gilt als Dokumentenablage "
-                f"(Vorpruefung uebersprungen)")
+        photo_iter: Iterator[PhotoInfo] = iter(())
+        force_uuids: set[str] = set()
+        force_document_all = False
+        try:
+            library = get_library(album=effective_album, mock_photos=mock_photos)
 
-        for photo in photos:
-            try:
-                processed = await self._process_photo(
-                    photo, run_id, log, force_document=force_document
+            # Zaehlen ohne Dateizugriff, damit das Dashboard sofort etwas zeigt
+            if scan_all:
+                photos_found = library.count_all_photos(
+                    date_from=date_from, date_to=date_to, scan_cutoff=scan_cutoff
                 )
-                if processed:
+                log(f"{photos_found} Aufnahmen zu pruefen (gesamte Library)")
+            else:
+                photos_found = library.count_photos_in_album(
+                    effective_album, date_from=date_from, date_to=date_to,
+                    scan_cutoff=scan_cutoff,
+                )
+                log(f"{photos_found} Aufnahmen zu pruefen (Album '{effective_album}')")
+            self.db.update_run_progress(run_id, photos_found=photos_found)
+
+            # FORCE_DOCUMENT_ALBUMS: selbst gepflegte Ablagen umgehen die Vorpruefung
+            if force_albums:
+                if scan_all:
+                    force_uuids = library.uuids_in_albums(force_albums)
+                    if force_uuids:
+                        log(f"{len(force_uuids)} Aufnahmen aus {sorted(force_albums)} "
+                            f"gelten ohne Vorpruefung als Dokument")
+                elif effective_album.strip().casefold() in {
+                    a.casefold() for a in force_albums
+                }:
+                    force_document_all = True
+                    log(f"Album '{effective_album}' ist Dokumentenablage "
+                        f"(Vorpruefung uebersprungen)")
+
+            if scan_all:
+                photo_iter = library.iter_all_photos(
+                    icloud_timeout=self.settings.icloud_download_timeout,
+                    date_from=date_from, date_to=date_to,
+                    skip_cloud_only=skip_cloud_only, scan_cutoff=scan_cutoff,
+                )
+            else:
+                photo_iter = library.iter_photos_in_album(
+                    effective_album,
+                    icloud_timeout=self.settings.icloud_download_timeout,
+                    date_from=date_from, date_to=date_to,
+                    skip_cloud_only=skip_cloud_only, scan_cutoff=scan_cutoff,
+                )
+        except Exception as e:
+            log(f"ERROR fetching photos: {e}")
+            errors += 1
+
+        gesehen = 0
+        for photo in photo_iter:
+            gesehen += 1
+            try:
+                verarbeitet = await self._process_photo(
+                    photo, run_id, log,
+                    force_document=force_document_all or photo.uuid in force_uuids,
+                )
+                if verarbeitet:
                     docs_processed += 1
+                else:
+                    photos_skipped += 1
             except Exception as e:
                 log(f"ERROR processing photo {photo.filename}: {e}")
                 errors += 1
+            # Zwischenstand: bei einem Vollscan laeuft das lange
+            if gesehen % 25 == 0:
+                self.db.update_run_progress(
+                    run_id, docs_processed=docs_processed, photos_skipped=photos_skipped
+                )
 
-        # ── 2. Email ───────────────────────────────────────────────────────────
+        # ── 4. Email ──────────────────────────────────────────────────────────
         if self.settings.email_enabled:
             email_docs, email_errors = await self._process_emails(run_id, log)
             docs_processed += email_docs
             errors += email_errors
 
         status = "error" if errors and not docs_processed else "success"
-        log(f"Pipeline finished — processed: {docs_processed}, errors: {errors}, status: {status}")
+        log(f"Pipeline finished — processed: {docs_processed}, "
+            f"skipped: {photos_skipped}, errors: {errors}, status: {status}")
 
         self.db.finish_run(
             run_id=run_id,
@@ -208,7 +283,17 @@ class Pipeline:
             docs_processed=docs_processed,
             errors=errors,
             log="\n".join(log_lines),
+            photos_skipped=photos_skipped,
         )
+
+        # ── 5. Scan-Stand fortschreiben ───────────────────────────────────────
+        # Nur nach einem erfolgreichen Lauf ohne manuellen Datumsfilter: sonst
+        # gelten Aufnahmen als gesehen, die nie geprueft wurden.
+        if status == "success" and not (date_from or date_to):
+            try:
+                self.db.update_scan_state(album_key, run_started, photos_found)
+            except Exception as e:
+                logger.warning("Scan-Stand nicht gespeichert", album=album_key, error=str(e))
 
         return run_id
 

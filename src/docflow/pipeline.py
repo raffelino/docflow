@@ -22,11 +22,15 @@ from PIL import Image
 
 from docflow.config import Settings
 from docflow.db import Database
+from docflow.imaging import ensure_heif_support
 from docflow.llm import DocumentClassification, get_llm_provider
 from docflow.llm.base import LLMProvider
 from docflow.ocr import extract_text
 from docflow.photos import PhotoInfo, get_library
 from docflow.storage import StorageBackend, get_storage_backend
+
+# HEIC muss registriert sein, bevor Pillow das erste Foto oeffnet.
+ensure_heif_support()
 
 logger = structlog.get_logger(__name__)
 
@@ -210,7 +214,7 @@ class Pipeline:
         # Compute file hash for dedup
         file_hash = hashlib.sha256(photo.path.read_bytes()).hexdigest()
         if self.db.document_exists(file_hash=file_hash):
-            log(f"  SKIP: Already processed (identical file hash)")
+            log("  SKIP: Already processed (identical file hash)")
             return False
 
         ocr_text = await extract_text(photo.path)

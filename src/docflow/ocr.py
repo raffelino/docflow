@@ -11,7 +11,11 @@ from pathlib import Path
 
 import structlog
 
+from docflow.imaging import ensure_heif_support
+
 logger = structlog.get_logger(__name__)
+
+ensure_heif_support()
 
 # Try to import pyobjc Vision framework
 _VISION_AVAILABLE = False

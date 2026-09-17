@@ -480,3 +480,97 @@ class TestInkrementellerScan:
         assert db.get_run(run_id)["photos_found"] == 1
         # ... aber der Bereich umfasst beide
         assert db.get_scan_state(settings.photos_album)["total_scanned"] == 2
+
+
+@pytest.mark.unit
+class TestTempAufraeumen:
+    """iCloud-Kopien duerfen auf keinem Weg liegen bleiben.
+
+    Regression: die Aufraeumlogik stand im finally des PDF-Blocks, also hinter
+    der Klassifikation. Aussortierte Fotos (der haeufigste Fall) liefen vorher
+    daran vorbei — pro Nachtlauf blieben Dutzende HEIC-Kopien im
+    Temp-Verzeichnis liegen.
+    """
+
+    @staticmethod
+    def _storage(settings: Settings):
+        from docflow.storage.local import LocalStorage
+
+        return LocalStorage(base_dir=settings.output_dir)
+
+    @staticmethod
+    def _temp_export(tmp_path: Path, monkeypatch) -> Path:
+        """Ein Export-Verzeichnis nachbauen, wie der iCloud-Download es anlegt."""
+        import tempfile as _tempfile
+
+        monkeypatch.setattr(_tempfile, "gettempdir", lambda: str(tmp_path))
+        export_dir = tmp_path / "docflow_export_test1"
+        export_dir.mkdir()
+        bild = export_dir / "IMG_9999.jpg"
+        from PIL import Image
+
+        Image.new("RGB", (60, 60), color=(1, 2, 3)).save(bild, format="JPEG")
+        return bild
+
+    async def _lauf(self, settings, db, mock_llm, bild, ocr_text):
+        photo = PhotoInfo(
+            uuid="tmp-001", filename="IMG_9999.jpg", path=bild,
+            original_filename="IMG_9999.jpg",
+        )
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value=ocr_text)):
+            with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([photo])):
+                pipeline = Pipeline(
+                    settings=settings, db=db, llm=mock_llm, storage=self._storage(settings)
+                )
+                await pipeline.run()
+
+    @pytest.mark.asyncio
+    async def test_aussortiertes_foto_raeumt_auf(
+        self, settings: Settings, db: Database, tmp_path: Path, mock_llm, monkeypatch
+    ):
+        settings.force_document_albums = ""
+        bild = self._temp_export(tmp_path, monkeypatch)
+        await self._lauf(settings, db, mock_llm, bild, "")
+        assert not bild.exists()
+        assert not bild.parent.exists()
+
+    @pytest.mark.asyncio
+    async def test_verarbeitetes_dokument_raeumt_auf(
+        self, settings: Settings, db: Database, tmp_path: Path, mock_llm, monkeypatch
+    ):
+        bild = self._temp_export(tmp_path, monkeypatch)
+        await self._lauf(settings, db, mock_llm, bild, DOKUMENT_TEXT)
+        assert db.list_documents()[0]["doc_type"] == "Rechnung"
+        assert not bild.parent.exists()
+
+    @pytest.mark.asyncio
+    async def test_dedup_raeumt_auf(
+        self, settings: Settings, db: Database, tmp_path: Path, mock_llm, monkeypatch
+    ):
+        """Auch wenn die Aufnahme schon bekannt ist, wurde sie vorher geladen."""
+        db.insert_document(
+            run_id=db.create_run(), original_photo_id="tmp-001",
+            original_filename="IMG_9999.jpg", ocr_text="", llm_provider=None,
+            doc_type="Foto", tags=[], suggested_filename="IMG_9999.jpg", saved_path=None,
+        )
+        bild = self._temp_export(tmp_path, monkeypatch)
+        await self._lauf(settings, db, mock_llm, bild, DOKUMENT_TEXT)
+        assert not bild.parent.exists()
+
+    @pytest.mark.asyncio
+    async def test_originale_werden_nie_angefasst(
+        self, settings: Settings, db: Database, tmp_path: Path, mock_llm, monkeypatch
+    ):
+        """Nur Pfade im Temp-Verzeichnis mit unserem Praefix werden geloescht."""
+        settings.force_document_albums = ""
+        import tempfile as _tempfile
+
+        monkeypatch.setattr(_tempfile, "gettempdir", lambda: str(tmp_path / "tmp"))
+        original = tmp_path / "Photos Library" / "IMG_1.jpg"
+        original.parent.mkdir(parents=True)
+        from PIL import Image
+
+        Image.new("RGB", (60, 60)).save(original, format="JPEG")
+
+        await self._lauf(settings, db, mock_llm, original, "")
+        assert original.exists(), "Ein Original in der Photos-Library darf nie geloescht werden"

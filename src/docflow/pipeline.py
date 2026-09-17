@@ -28,7 +28,7 @@ from docflow.keychain import resolve_email_password
 from docflow.llm import DocumentClassification, get_llm_provider
 from docflow.llm.base import LLMProvider
 from docflow.ocr import extract_text
-from docflow.photos import PhotoInfo, get_library
+from docflow.photos import PhotoInfo, cleanup_temp_export, get_library
 from docflow.pre_classifier import classify_media
 from docflow.storage import StorageBackend, get_storage_backend
 
@@ -355,7 +355,26 @@ class Pipeline:
         log,
         force_document: bool = False,
     ) -> bool:
-        """Process a single photo. Returns True if processed, False if skipped."""
+        """Process a single photo. Returns True if processed, False if skipped.
+
+        Raeumt in jedem Fall eine temporaere iCloud-Kopie auf — auch auf den
+        frueh abbrechenden Wegen (Dedup, Video, Vorpruefung). Dort lag vorher
+        ein Leck: pro Nachtlauf mit vielen neuen Fotos blieben Dutzende
+        HEIC-Kopien im Temp-Verzeichnis liegen, weil die Aufraeumlogik erst
+        hinter der Klassifikation stand.
+        """
+        try:
+            return await self._process_photo_inner(photo, run_id, log, force_document)
+        finally:
+            cleanup_temp_export(photo.path)
+
+    async def _process_photo_inner(
+        self,
+        photo: PhotoInfo,
+        run_id: int,
+        log,
+        force_document: bool = False,
+    ) -> bool:
         log(f"Processing photo: {photo.filename}")
 
         # Duplicate check by UUID
@@ -414,7 +433,6 @@ class Pipeline:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             tmp_path = Path(tmp.name)
 
-        is_temp_export = str(photo.path).startswith(tempfile.gettempdir())
         try:
             pdf_bytes = _image_to_pdf_bytes(photo.path)
             tmp_path.write_bytes(pdf_bytes)
@@ -424,13 +442,7 @@ class Pipeline:
             log(f"  Saved to: {saved_path}")
         finally:
             tmp_path.unlink(missing_ok=True)
-            # Clean up AppleScript-exported temp files
-            if is_temp_export:
-                photo.path.unlink(missing_ok=True)
-                parent = photo.path.parent
-                if parent.name.startswith("docflow_export_"):
-                    import shutil
-                    shutil.rmtree(parent, ignore_errors=True)
+            # Die iCloud-Kopie raeumt _process_photo auf, unabhaengig vom Ausgang.
 
         # DB
         self.db.insert_document(

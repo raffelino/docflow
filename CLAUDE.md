@@ -71,6 +71,17 @@ gegen 871 klassifizierte Dokumente): 100 % Recall bei 2,5 % Falsch-Positiven.
 aber auch 36,7 % der echten Dokumente — Online-Rechnungen und Tickets liegen als
 Screenshot vor. Ein Regressionstest haelt das fest.
 
+## Dokumentdatum (doc_date.py)
+
+Das LLM nennt `document_date` + `date_kind`; uebernommen wird es nur, wenn es
+`explicit` ist, **woertlich im OCR-Text** steht und plausibel ist (>= 1990,
+max. ein Jahr nach dem Fotodatum). Sonst gilt das Fotodatum. Grund: mit dem
+alten Prompt ("use today's date if no date visible") trugen 56 % der Dokumente
+das halluzinierte "heute" des Modells (2023-03..05) im Dateinamen.
+`effective_date`/`date_source` bestimmen Ordner `YYYY/MM`, Dateinamen-Praefix
+und die Sortiermodi `doc_date`/`photo_date`. Bestand nachziehen:
+`uv run python scripts/backfill_dates.py --dry-run` (verschiebt keine Dateien).
+
 ## Architecture Overview
 
 ```
@@ -162,6 +173,7 @@ frontend/
 | `photos.py` | osxphotos adapter; `PhotoInfo` dataclass; `MockPhotosLibrary` for testing |
 | `email_source.py` | IMAP reader; extracts PDF/image attachments; marks/moves processed messages |
 | `pipeline.py` | Orchestrates: fetch → OCR → LLM → PDF → storage → DB |
+| `doc_date.py` | Dokumentdatum pruefen (LLM-Datum gegen OCR-Text), Fallback Fotodatum, Dateinamen-Praefix |
 | `scheduler.py` | APScheduler cron job wrapping pipeline; daily run at configured hour:minute |
 | `llm/` | `base.py`: protocol + `DocumentClassification`; `anthropic.py`, `ollama.py`, `openrouter.py` |
 | `storage/` | `base.py`: `StorageBackend` protocol; `local.py`, `icloud.py`, `generic_cloud.py` |
@@ -342,7 +354,8 @@ runs(id, started_at, finished_at, status, photos_found, docs_processed, errors, 
 documents(id, run_id, original_photo_id, original_filename, ocr_text,
           llm_provider, doc_type, tags, suggested_filename, saved_path, created_at,
           source, email_subject, email_sender, email_date,
-          storage_backend, cloud_path)
+          storage_backend, cloud_path, file_hash, photo_date, file_size_bytes,
+          document_date, date_kind, effective_date, date_source)
 documents_fts  -- FTS5 virtual table, synced via triggers
 ```
 

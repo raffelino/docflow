@@ -195,6 +195,33 @@ class TestOpenRouterProvider:
             result = await provider.classify_document("Rechnung Telekom")
 
         assert result.doc_type == "Rechnung"
+        # Reasoning aus und JSON-Modus: sonst frisst DeepSeek das Token-Budget
+        # mit Nachdenken auf und liefert gar keinen content.
+        payload = mock_client.post.call_args.kwargs["json"]
+        assert payload["reasoning"] == {"enabled": False}
+        assert payload["response_format"] == {"type": "json_object"}
+        assert payload["max_tokens"] >= 1024
+
+    @pytest.mark.asyncio
+    async def test_leerer_content_ist_ein_klarer_fehler(self):
+        # Reasoning-Modell am Token-Limit: content=None, finish_reason='length'.
+        # Vorher: "'NoneType' object is not subscriptable".
+        from docflow.llm.openrouter import OpenRouterProvider
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": None}, "finish_reason": "length"}]
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        provider = OpenRouterProvider(api_key="or-test-key")
+        with patch("docflow.llm.openrouter.httpx.AsyncClient", return_value=mock_client):
+            with pytest.raises(ValueError, match="keinen Inhalt.*length"):
+                await provider.classify_document("Rechnung")
 
     def test_raises_without_api_key(self):
         from docflow.llm.openrouter import OpenRouterProvider

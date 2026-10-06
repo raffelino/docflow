@@ -14,7 +14,7 @@ GET /api/settings
   "llm_provider": "anthropic",
   "ollama_base_url": "http://localhost:11434",
   "ollama_model": "llama3.2",
-  "openrouter_model": "anthropic/claude-haiku-4.5",
+  "openrouter_model": "deepseek/deepseek-v4.1-flash",
   "storage_backend": "local",
   "output_dir": "/Users/.../output",
   "schedule_hour": "2",

@@ -18,7 +18,7 @@ Alle Einstellungen werden ueber Umgebungsvariablen oder die `.env`-Datei konfigu
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama Server URL |
 | `OLLAMA_MODEL` | `llama3.2` | Ollama Modellname |
 | `OPENROUTER_API_KEY` | – | API-Key fuer OpenRouter |
-| `OPENROUTER_MODEL` | `anthropic/claude-haiku-4.5` | OpenRouter Modellname |
+| `OPENROUTER_MODEL` | `deepseek/deepseek-v4.1-flash` | OpenRouter Modellname |
 
 ## Speicher
 

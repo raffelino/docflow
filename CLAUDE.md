@@ -11,7 +11,7 @@
 - **Server start**: `cd ~/git/docflow && nohup .venv/bin/python -m docflow > /tmp/docflow.log 2>&1 &`
 - **Repo**: `~/git/docflow` — **nicht** unter `~/.openclaw/workspace/`, dort wurde das
   Verzeichnis am 2026-09-08 von einem naechtlichen Job geloescht (siehe `recovery/`)
-- **LLM**: OpenRouter (`anthropic/claude-haiku-4.5`) — Claude 3 Haiku ist bei OpenRouter abgeschaltet (seit 2026-10 antwortet es mit 404, Deprecation vom 2026-09-10)
+- **LLM**: OpenRouter (`deepseek/deepseek-v4.1-flash`) — Claude 3 Haiku ist bei OpenRouter abgeschaltet (seit 2026-10 antwortet es mit 404, Deprecation vom 2026-09-10)
 
 ## Critical Config Rules
 

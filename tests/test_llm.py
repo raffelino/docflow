@@ -48,6 +48,20 @@ class TestParseClassificationResponse:
         with pytest.raises(Exception):
             parse_classification_response("not json at all")
 
+    def test_dokumentdatum_wird_gelesen(self):
+        raw = json.dumps(
+            {"doc_type": "Rechnung", "document_date": "2024-05-13", "date_kind": "Explicit"}
+        )
+        result = parse_classification_response(raw)
+        assert result.document_date == "2024-05-13"
+        assert result.date_kind == "explicit"
+
+    def test_dokumentdatum_null_und_fehlend(self):
+        assert parse_classification_response('{"doc_type": "Brief", "document_date": null}').document_date is None
+        result = parse_classification_response('{"doc_type": "Brief"}')
+        assert result.document_date is None
+        assert result.date_kind == "none"
+
 
 @pytest.mark.unit
 class TestBuildPrompt:
@@ -58,6 +72,14 @@ class TestBuildPrompt:
     def test_prompt_requests_json(self):
         prompt = build_prompt("anything")
         assert "JSON" in prompt
+
+    def test_prompt_verbietet_heutiges_datum(self):
+        # Mit "use today's date" trugen 56 % der Dokumente das halluzinierte
+        # "heute" des Modells (2023-03 bis 2023-05) im Dateinamen.
+        prompt = build_prompt("anything")
+        assert "today's date if no date" not in prompt
+        assert "document_date" in prompt
+        assert "date_kind" in prompt
         assert "doc_type" in prompt
 
 

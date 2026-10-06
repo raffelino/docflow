@@ -28,6 +28,15 @@ export interface Document {
   email_date: string | null;
   storage_backend: string | null;
   cloud_path: string | null;
+  /** Aufnahmedatum (ISO mit Zeitzone), bei Mail-Anhaengen das Mail-Datum */
+  photo_date: string | null;
+  /** Vom LLM genannt und im OCR-Text bestaetigt: YYYY-MM-DD oder YYYY-MM */
+  document_date: string | null;
+  /** Wirksames Datum fuer Ablage und Sortierung (YYYY-MM-DD) */
+  effective_date: string | null;
+  /** Woher effective_date stammt: 'document' | 'photo' | 'none' */
+  date_source: "document" | "photo" | "none" | null;
+  file_size_bytes: number | null;
 }
 
 export interface Settings {

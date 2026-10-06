@@ -23,6 +23,7 @@ from PIL import Image
 
 from docflow.config import Settings
 from docflow.db import Database
+from docflow.doc_date import DateResolution, apply_date_prefix, resolve_document_date
 from docflow.imaging import ensure_heif_support
 from docflow.keychain import resolve_email_password
 from docflow.llm import DocumentClassification, get_llm_provider
@@ -107,14 +108,37 @@ def _image_bytes_to_pdf_bytes(data: bytes) -> bytes:
         return out.getvalue()
 
 
-def _destination_path(classification: DocumentClassification, created_at: datetime) -> str:
-    """Build a relative destination path like ``2026/03/filename.pdf``."""
-    year = created_at.strftime("%Y")
-    month = created_at.strftime("%m")
-    filename = _safe_filename(classification.suggested_filename)
+def _destination_path(classification: DocumentClassification, datum: datetime | date) -> str:
+    """Build a relative destination path like ``2026/03/2026-03_filename.pdf``.
+
+    ``datum`` ist das wirksame Dokumentdatum (siehe ``doc_date``), nicht mehr
+    der Verarbeitungszeitpunkt: ein 2022 fotografierter Brief gehoert nach
+    2022/..., auch wenn er erst heute durch die Pipeline laeuft. Den
+    ``YYYY-MM_``-Praefix setzt der Code — ein vom LLM geratener wird ersetzt.
+    """
+    year = datum.strftime("%Y")
+    month = datum.strftime("%m")
+    filename = _safe_filename(apply_date_prefix(classification.suggested_filename, datum))
     if not filename.lower().endswith(".pdf"):
         filename += ".pdf"
     return f"{year}/{month}/{filename}"
+
+
+def _resolve_dates(
+    classification: DocumentClassification,
+    ocr_text: str,
+    fallback: datetime | date | None,
+    log,
+    indent: str = "  ",
+) -> tuple[DateResolution, datetime | date]:
+    """Dokumentdatum pruefen und das Ablagedatum bestimmen (zuletzt: jetzt)."""
+    resolution = resolve_document_date(
+        classification.document_date, classification.date_kind, ocr_text, fallback
+    )
+    ablage: datetime | date = resolution.effective_date or datetime.utcnow()
+    quelle = {"document": "Dokument", "photo": "Aufnahme", "none": "Verarbeitung"}[resolution.source]
+    log(f"{indent}Datum: {ablage:%Y-%m-%d} aus {quelle} — {resolution.reason}")
+    return resolution, ablage
 
 
 class Pipeline:
@@ -426,9 +450,10 @@ class Pipeline:
             f"filename={classification.suggested_filename})"
         )
 
-        # PDF creation
-        created_at = datetime.utcnow()
-        dest_path = _destination_path(classification, created_at)
+        # Datum: bestaetigtes Dokumentdatum, sonst Aufnahmedatum
+        photo_date = photo.photo_date or photo.date
+        resolution, ablage = _resolve_dates(classification, ocr_text, photo_date, log)
+        dest_path = _destination_path(classification, ablage)
 
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             tmp_path = Path(tmp.name)
@@ -453,11 +478,17 @@ class Pipeline:
             llm_provider=self.settings.llm_provider,
             doc_type=classification.doc_type,
             tags=classification.tags,
-            suggested_filename=classification.suggested_filename,
+            suggested_filename=Path(dest_path).name,
             saved_path=saved_path,
             source="photos",
             storage_backend=self.storage.name,
             file_hash=file_hash,
+            photo_date=photo_date,
+            file_size_bytes=len(pdf_bytes),
+            document_date=resolution.document_date_iso,
+            date_kind=classification.date_kind,
+            effective_date=resolution.effective_date_iso,
+            date_source=resolution.source,
         )
         return True
 
@@ -499,9 +530,12 @@ class Pipeline:
                     f"(filename={classification.suggested_filename})"
                 )
 
+                # Datum: bestaetigtes Dokumentdatum, sonst Mail-Datum
+                resolution, ablage = _resolve_dates(
+                    classification, ocr_text, attachment.email_date, log, indent="    "
+                )
+                dest_path = _destination_path(classification, ablage)
                 # PDF — if PDF attachment, use directly; else convert image
-                created_at = datetime.utcnow()
-                dest_path = _destination_path(classification, created_at)
                 ext = Path(attachment.filename).suffix.lower()
 
                 with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
@@ -509,10 +543,10 @@ class Pipeline:
 
                 try:
                     if ext == ".pdf":
-                        tmp_path.write_bytes(attachment.data)
+                        pdf_bytes = attachment.data
                     else:
                         pdf_bytes = _image_bytes_to_pdf_bytes(attachment.data)
-                        tmp_path.write_bytes(pdf_bytes)
+                    tmp_path.write_bytes(pdf_bytes)
 
                     saved_path = await self.storage.save(tmp_path, dest_path)
                     log(f"    Saved to: {saved_path}")
@@ -527,13 +561,19 @@ class Pipeline:
                     llm_provider=self.settings.llm_provider,
                     doc_type=classification.doc_type,
                     tags=classification.tags,
-                    suggested_filename=classification.suggested_filename,
+                    suggested_filename=Path(dest_path).name,
                     saved_path=saved_path,
                     source="email",
                     email_subject=attachment.subject,
                     email_sender=attachment.sender,
                     email_date=attachment.email_date,
                     storage_backend=self.storage.name,
+                    photo_date=attachment.email_date,
+                    file_size_bytes=len(pdf_bytes),
+                    document_date=resolution.document_date_iso,
+                    date_kind=classification.date_kind,
+                    effective_date=resolution.effective_date_iso,
+                    date_source=resolution.source,
                 )
                 docs_processed += 1
 

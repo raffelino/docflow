@@ -92,6 +92,19 @@ MIGRATIONS = [
     "ALTER TABLE documents ADD COLUMN cloud_path TEXT",
     "ALTER TABLE documents ADD COLUMN file_hash TEXT",
     "ALTER TABLE runs ADD COLUMN photos_skipped INTEGER DEFAULT 0",
+    # Aufnahmedatum (ISO mit Zeitzone) und Groesse des erzeugten PDFs. Beide
+    # Spalten gab es in der Produktions-DB schon, der wiederhergestellte Code
+    # hat sie bis 2026-10 nicht mehr geschrieben.
+    "ALTER TABLE documents ADD COLUMN photo_date TEXT",
+    "ALTER TABLE documents ADD COLUMN file_size_bytes INTEGER",
+    # Dokumentdatum: vom LLM genannt und im OCR-Text bestaetigt (document_date,
+    # YYYY-MM-DD oder YYYY-MM), die Art laut LLM (date_kind), und das daraus
+    # abgeleitete wirksame Datum (effective_date, YYYY-MM-DD) samt Herkunft
+    # (date_source: 'document' | 'photo' | 'none'). Siehe doc_date.py.
+    "ALTER TABLE documents ADD COLUMN document_date TEXT",
+    "ALTER TABLE documents ADD COLUMN date_kind TEXT",
+    "ALTER TABLE documents ADD COLUMN effective_date TEXT",
+    "ALTER TABLE documents ADD COLUMN date_source TEXT",
 ]
 
 
@@ -246,16 +259,27 @@ class Database:
         storage_backend: str | None = None,
         cloud_path: str | None = None,
         file_hash: str | None = None,
+        photo_date: datetime | str | None = None,
+        file_size_bytes: int | None = None,
+        document_date: str | None = None,
+        date_kind: str | None = None,
+        effective_date: str | None = None,
+        date_source: str | None = None,
     ) -> int:
+        if isinstance(photo_date, datetime):
+            photo_date = photo_date.isoformat()
         with self._connect() as conn:
             cur = conn.execute(
                 """INSERT INTO documents
                    (run_id, original_photo_id, original_filename, ocr_text,
                     llm_provider, doc_type, tags, suggested_filename, saved_path, created_at,
                     source, email_subject, email_sender, email_date,
-                    storage_backend, cloud_path, file_hash)
+                    storage_backend, cloud_path, file_hash,
+                    photo_date, file_size_bytes,
+                    document_date, date_kind, effective_date, date_source)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                           ?, ?, ?, ?, ?, ?, ?)""",
+                           ?, ?, ?, ?, ?, ?, ?,
+                           ?, ?, ?, ?, ?, ?)""",
                 (
                     run_id,
                     original_photo_id,
@@ -274,18 +298,61 @@ class Database:
                     storage_backend,
                     cloud_path,
                     file_hash,
+                    photo_date,
+                    file_size_bytes,
+                    document_date,
+                    date_kind,
+                    effective_date,
+                    date_source,
                 ),
             )
             return cur.lastrowid  # type: ignore[return-value]
 
+    def update_document_dates(
+        self,
+        doc_id: int,
+        document_date: str | None,
+        date_kind: str | None,
+        effective_date: str | None,
+        date_source: str | None,
+        suggested_filename: str | None = None,
+    ) -> None:
+        """Datumsfelder eines Bestandsdokuments nachziehen (scripts/backfill_dates.py).
+
+        Dateiname und Ablagepfad bleiben unangetastet, sofern kein neuer Name
+        uebergeben wird — Dateien verschiebt der Nachlauf nie.
+        """
+        with self._connect() as conn:
+            conn.execute(
+                """UPDATE documents
+                   SET document_date=?, date_kind=?, effective_date=?, date_source=?,
+                       suggested_filename=COALESCE(?, suggested_filename)
+                   WHERE id=?""",
+                (document_date, date_kind, effective_date, date_source,
+                 suggested_filename, doc_id),
+            )
+
+    def iter_documents(self, where: str = "", params: tuple = ()) -> list[dict]:
+        """Rohzugriff fuer Wartungsskripte; ``where`` ist Code, keine Nutzereingabe."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM documents {('WHERE ' + where) if where else ''} ORDER BY id",
+                params,
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     # Erlaubte Sortierfelder. Als feste Zuordnung, weil der Spaltenname in das
     # SQL interpoliert wird — Nutzereingaben duerfen dort nie direkt landen.
+    # Die beiden Datumsmodi fallen auf created_at zurueck, damit Aufnahmen ohne
+    # Datum (aussortierte Fotos, alte Eintraege) nicht als Block oben liegen.
     SORT_COLUMNS: dict[str, str] = {
         "created_at": "created_at",
         "doc_type": "doc_type",
         "filename": "suggested_filename",
         "source": "source",
         "size": "file_size_bytes",
+        "photo_date": "COALESCE(photo_date, created_at)",
+        "doc_date": "COALESCE(effective_date, photo_date, created_at)",
     }
 
     def list_documents(

@@ -574,3 +574,125 @@ class TestTempAufraeumen:
 
         await self._lauf(settings, db, mock_llm, original, "")
         assert original.exists(), "Ein Original in der Photos-Library darf nie geloescht werden"
+
+
+@pytest.mark.unit
+class TestDokumentdatum:
+    """Ablage und DB folgen dem geprueften Dokumentdatum, sonst dem Fotodatum."""
+
+    FOTO_DATUM = datetime(2026, 9, 14, 10, 0)
+
+    @staticmethod
+    def _storage(settings: Settings):
+        from docflow.storage.local import LocalStorage
+
+        return LocalStorage(base_dir=settings.output_dir)
+
+    async def _lauf(self, settings, db, fake_image, classification, text=DOKUMENT_TEXT):
+        from tests.conftest import make_mock_llm
+
+        photo = PhotoInfo(
+            uuid="datum-001",
+            filename="doc.jpg",
+            path=fake_image,
+            original_filename="doc.jpg",
+            date=self.FOTO_DATUM,
+            photo_date=self.FOTO_DATUM,
+        )
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value=text)):
+            pipeline = Pipeline(
+                settings=settings, db=db, llm=make_mock_llm(classification),
+                storage=self._storage(settings),
+            )
+            with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([photo])):
+                run_id = await pipeline.run()
+        docs = db.list_documents()
+        assert len(docs) == 1
+        return docs[0], db.get_run(run_id)
+
+    @pytest.mark.asyncio
+    async def test_bestaetigtes_dokumentdatum_bestimmt_ablage(
+        self, settings: Settings, db: Database, fake_image: Path
+    ):
+        # DOKUMENT_TEXT enthaelt "Datum: 12.09.2026"
+        cls = DocumentClassification(
+            doc_type="Rechnung", tags=[], suggested_filename="Vodafone_Rechnung.pdf",
+            confidence=0.9, document_date="2026-09-12", date_kind="explicit",
+        )
+        doc, run = await self._lauf(settings, db, fake_image, cls)
+
+        assert doc["document_date"] == "2026-09-12"
+        assert doc["effective_date"] == "2026-09-12"
+        assert doc["date_source"] == "document"
+        assert doc["date_kind"] == "explicit"
+        assert doc["suggested_filename"] == "2026-09_Vodafone_Rechnung.pdf"
+        assert doc["saved_path"].endswith("2026/09/2026-09_Vodafone_Rechnung.pdf")
+        assert "Dokumentdatum 2026-09-12 im Text bestaetigt" in run["log"]
+
+    @pytest.mark.asyncio
+    async def test_halluziniertes_datum_faellt_auf_fotodatum_zurueck(
+        self, settings: Settings, db: Database, fake_image: Path
+    ):
+        # Das LLM behauptet 2023-05, im Text steht davon nichts — klassisches "heute".
+        cls = DocumentClassification(
+            doc_type="Brief", tags=[], suggested_filename="2023-05_Amt_Brief.pdf",
+            confidence=0.9, document_date="2023-05-01", date_kind="explicit",
+        )
+        doc, run = await self._lauf(settings, db, fake_image, cls)
+
+        assert doc["document_date"] is None
+        assert doc["effective_date"] == "2026-09-14"
+        assert doc["date_source"] == "photo"
+        # Der geratene Praefix wird durch das Fotodatum ersetzt
+        assert doc["suggested_filename"] == "2026-09_Amt_Brief.pdf"
+        assert doc["saved_path"].endswith("2026/09/2026-09_Amt_Brief.pdf")
+        assert "nicht im OCR-Text gefunden" in run["log"]
+
+    @pytest.mark.asyncio
+    async def test_fotodatum_und_groesse_werden_gespeichert(
+        self, settings: Settings, db: Database, fake_image: Path
+    ):
+        # Regression: der wiederhergestellte Code hatte photo_date und
+        # file_size_bytes nicht mehr geschrieben (Laeufe 119-125).
+        doc, _ = await self._lauf(settings, db, fake_image, FAKE_CLASSIFICATION)
+
+        assert doc["photo_date"] == self.FOTO_DATUM.isoformat()
+        assert doc["file_size_bytes"] == Path(doc["saved_path"]).stat().st_size
+        assert doc["file_size_bytes"] > 0
+
+    @pytest.mark.asyncio
+    async def test_ohne_fotodatum_landet_es_bei_der_verarbeitung(
+        self, settings: Settings, db: Database, fake_image: Path, mock_llm
+    ):
+        photo = PhotoInfo(uuid="x", filename="doc.jpg", path=fake_image, original_filename="doc.jpg")
+        with patch("docflow.pipeline.extract_text", new=AsyncMock(return_value=DOKUMENT_TEXT)):
+            pipeline = Pipeline(settings=settings, db=db, llm=mock_llm, storage=self._storage(settings))
+            with patch("docflow.pipeline.get_library", return_value=MockPhotosLibrary([photo])):
+                await pipeline.run()
+        doc = db.list_documents()[0]
+        assert doc["date_source"] == "none"
+        assert doc["effective_date"] is None
+        heute = datetime.utcnow()
+        assert doc["saved_path"].endswith(
+            f"{heute:%Y}/{heute:%m}/{heute:%Y-%m}_Vodafone_Rechnung.pdf"
+        )
+
+    def test_sortierung_nach_beiden_datumsmodi(self, db: Database):
+        run_id = db.create_run()
+
+        def eintrag(name, photo_date, effective_date, source):
+            db.insert_document(
+                run_id=run_id, original_photo_id=name, original_filename=name,
+                ocr_text="", llm_provider=None, doc_type="Brief", tags=[],
+                suggested_filename=name, saved_path=None,
+                photo_date=photo_date, effective_date=effective_date, date_source=source,
+            )
+
+        # 2022er Brief, 2026 abfotografiert; 2024er Beleg, 2024 fotografiert
+        eintrag("alt.pdf", datetime(2026, 6, 1), "2022-03-15", "document")
+        eintrag("neu.pdf", datetime(2024, 8, 12), "2024-08-12", "photo")
+
+        nach_doc = [d["suggested_filename"] for d in db.list_documents(sort="doc_date", order="desc")]
+        nach_foto = [d["suggested_filename"] for d in db.list_documents(sort="photo_date", order="desc")]
+        assert nach_doc == ["neu.pdf", "alt.pdf"]
+        assert nach_foto == ["alt.pdf", "neu.pdf"]

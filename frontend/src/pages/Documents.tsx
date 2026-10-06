@@ -3,11 +3,53 @@ import { useSearchParams } from "react-router-dom";
 import { getDocuments, getDocTypes, thumbnailUrl, type Document } from "@/lib/api";
 import { SourceBadge } from "@/components/SourceBadge";
 import { StorageBadge } from "@/components/StorageBadge";
-import { formatDate, truncate } from "@/lib/utils";
+import { formatDate, formatDay, truncate } from "@/lib/utils";
 import { Search, X, ChevronLeft, ChevronRight, Eye, ArrowUp, ArrowDown,
   FileText } from "lucide-react";
 
 const LIMIT = 50;
+
+/** Welches Datum die Datumsspalte zeigt und wonach sie sortiert.
+ *
+ *  doc_date: das wirksame Dokumentdatum — vom LLM erkannt und im OCR-Text
+ *  bestaetigt, sonst das Fotodatum. Ein 2022 abfotografierter Brief steht so
+ *  bei 2022, nicht beim Aufnahmetag. photo_date: nur das Aufnahmedatum.
+ *  created_at: Verarbeitungszeitpunkt (das alte Verhalten). */
+type DatumsModus = "doc_date" | "photo_date" | "created_at";
+const DATUMS_MODI: Record<DatumsModus, string> = {
+  doc_date: "Dokumentdatum",
+  photo_date: "Fotodatum",
+  created_at: "Verarbeitet",
+};
+function istDatumsModus(s: string | null): s is DatumsModus {
+  return s !== null && s in DATUMS_MODI;
+}
+
+const QUELLEN_LABEL: Record<string, string> = {
+  document: "aus Dokument",
+  photo: "Fotodatum",
+  none: "Verarbeitung",
+};
+
+/** Datumszelle je Modus. Im Dokumentdatum-Modus steht darunter, woher das
+ *  Datum stammt — so sieht man, ob das LLM eines bestaetigen konnte. */
+function DatumZelle({ doc, modus }: { doc: Document; modus: DatumsModus }) {
+  if (modus === "created_at") return <>{formatDate(doc.created_at)}</>;
+  if (modus === "photo_date") return <>{formatDate(doc.photo_date)}</>;
+
+  // Reihenfolge wie COALESCE in der Sortierung; document_date vor
+  // effective_date, damit ein reines "2024-05" auch als Monat erscheint.
+  const wert = doc.document_date ?? doc.effective_date ?? doc.photo_date ?? doc.created_at;
+  const quelle = doc.date_source ?? (doc.photo_date ? "photo" : "none");
+  return (
+    <>
+      <span className={quelle === "document" ? "text-foreground" : undefined}>
+        {formatDay(wert)}
+      </span>
+      <p className="text-xs text-muted-foreground/70 mt-0.5">{QUELLEN_LABEL[quelle]}</p>
+    </>
+  );
+}
 
 /** Vorschaubild mit Platzhalter.
  *
@@ -51,7 +93,9 @@ export function DocumentsPage() {
   const docType = searchParams.get("doc_type") ?? "";
   const source = searchParams.get("source") ?? "";
   const offset = parseInt(searchParams.get("offset") ?? "0", 10);
-  const sort = searchParams.get("sort") ?? "created_at";
+  const datumParam = searchParams.get("datum");
+  const datumsModus: DatumsModus = istDatumsModus(datumParam) ? datumParam : "doc_date";
+  const sort = searchParams.get("sort") ?? datumsModus;
   const order = (searchParams.get("order") ?? "desc") as "asc" | "desc";
 
   const fetchDocs = useCallback(() => {
@@ -96,6 +140,16 @@ export function DocumentsPage() {
       next.set("sort", feld);
       next.set("order", "desc");
     }
+    next.delete("offset");
+    setSearchParams(next);
+  };
+
+  // Modus wechseln sortiert auch gleich danach — das ist der haeufigste Wunsch.
+  const setDatumsModus = (modus: DatumsModus) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("datum", modus);
+    next.set("sort", modus);
+    next.set("order", "desc");
     next.delete("offset");
     setSearchParams(next);
   };
@@ -180,6 +234,18 @@ export function DocumentsPage() {
             <option value="photos">Photos</option>
             <option value="email">Email</option>
           </select>
+          <select
+            value={datumsModus}
+            onChange={(e) => setDatumsModus(e.target.value as DatumsModus)}
+            title="Welches Datum angezeigt und sortiert wird"
+            className="px-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            {(Object.keys(DATUMS_MODI) as DatumsModus[]).map((m) => (
+              <option key={m} value={m}>
+                Datum: {DATUMS_MODI[m]}
+              </option>
+            ))}
+          </select>
           {hasFilters && (
             <button
               onClick={clearFilters}
@@ -222,7 +288,7 @@ export function DocumentsPage() {
                     <th className="px-6 py-3 text-left font-medium text-muted-foreground">
                       Speicher
                     </th>
-                    <SortHeader feld="created_at">Erstellt</SortHeader>
+                    <SortHeader feld={datumsModus}>{DATUMS_MODI[datumsModus]}</SortHeader>
                     <th className="px-6 py-3 text-left font-medium text-muted-foreground">
                       Pfad
                     </th>
@@ -283,8 +349,8 @@ export function DocumentsPage() {
                           backend={doc.storage_backend ?? "local"}
                         />
                       </td>
-                      <td className="px-6 py-3 text-muted-foreground">
-                        {formatDate(doc.created_at)}
+                      <td className="px-6 py-3 text-muted-foreground whitespace-nowrap">
+                        <DatumZelle doc={doc} modus={datumsModus} />
                       </td>
                       <td className="px-6 py-3 text-xs text-muted-foreground font-mono max-w-[200px] truncate">
                         {truncate(

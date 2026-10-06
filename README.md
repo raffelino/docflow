@@ -67,7 +67,7 @@ All settings are in `.env` (or environment variables):
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
 | `OLLAMA_MODEL` | `llama3.2` | Ollama model name |
 | `OPENROUTER_API_KEY` | — | Required for OpenRouter |
-| `OPENROUTER_MODEL` | `anthropic/claude-3-haiku` | OpenRouter model |
+| `OPENROUTER_MODEL` | `anthropic/claude-haiku-4.5` | OpenRouter model |
 | `SCHEDULE_HOUR` | `2` | Cron hour for daily run |
 | `SCHEDULE_MINUTE` | `0` | Cron minute for daily run |
 | `DB_PATH` | `~/Documents/DocFlow/docflow.db` | SQLite database path |

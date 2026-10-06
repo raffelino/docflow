@@ -16,7 +16,7 @@ class OpenRouterProvider:
     def __init__(
         self,
         api_key: str,
-        model: str = "anthropic/claude-3-haiku",
+        model: str = "anthropic/claude-haiku-4.5",
     ) -> None:
         if not api_key:
             raise ValueError("OPENROUTER_API_KEY is required for the OpenRouter provider")

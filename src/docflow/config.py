@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.2"
     openrouter_api_key: str = ""
-    openrouter_model: str = "anthropic/claude-3-haiku"
+    openrouter_model: str = "anthropic/claude-haiku-4.5"
 
     # ── Scheduler ─────────────────────────────────────────────────────────────
     schedule_hour: int = 2
